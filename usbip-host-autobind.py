@@ -375,8 +375,7 @@ async def index():
         opts = [f"<option value='none' {'selected' if assigned == 'none' else ''}>none</option>"]
         for cid in sorted(CLIENTS.keys()):
             selected = "selected" if cid == assigned else ""
-            disabled = "disabled" if (in_use and cid != in_use) else ""
-            opts.append(f"<option value='{cid}' {selected} {disabled}>{cid}</option>")
+            opts.append(f"<option value='{cid}' {selected}>{cid}</option>")
         options_html = "".join(opts)
         status = f"in use by <b>{in_use}</b>" if in_use else "free"
         return (

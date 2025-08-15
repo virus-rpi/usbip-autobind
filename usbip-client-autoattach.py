@@ -5,13 +5,23 @@ import re
 import sys
 import time
 import socket
+import logging
+
+logger = logging.getLogger("usbip-client")
+logger.setLevel(logging.INFO)
+if not logger.hasHandlers():
+    handler = logging.StreamHandler()
+    formatter = logging.Formatter('[%(asctime)s] %(levelname)s: %(message)s', datefmt='%Y-%m-%d %H:%M:%S')
+    handler.setFormatter(formatter)
+    logger.addHandler(handler)
+
 
 SOCKET_HOST = 'chikaraNeko.fritz.box'
 SOCKET_PORT = 65432
 RECONNECT_DELAY = 5  # seconds
 
 CLIENT_ID = socket.gethostname().strip().lower()
-print(f"Using hostname '{CLIENT_ID}' as client ID.")
+logger.info(f"Using hostname '{CLIENT_ID}' as client ID.")
 
 
 def parse_busids(usbip_output: str):
@@ -36,14 +46,15 @@ def list_bound_devices():
             capture_output=True, text=True
         )
     except FileNotFoundError:
-        print("Error: `usbip` command not found. Make sure it's installed and in PATH.")
+        logger.error("`usbip` command not found. Make sure it's installed and in PATH.")
         sys.exit(1)
 
     if result.returncode != 0:
-        print("usbip list failed:", result.stderr.strip())
+        logger.error(f"usbip list failed: {result.stderr.strip()}")
         return []
 
     return parse_busids(result.stdout)
+
 
 def get_attached_ports():
     """
@@ -79,34 +90,34 @@ def get_attached_ports():
 
 def attach_device(busid):
     """Attach to a device via USBIP."""
-    print(f"Attaching to {busid}...")
+    logger.info(f"Attaching to {busid}...")
     result = subprocess.run(
         ["usbip", "attach", "-r", SOCKET_HOST, "-b", busid],
         capture_output=True, text=True
     )
     if result.stdout.strip():
-        print(result.stdout.strip())
+        logger.info(result.stdout.strip())
     if result.stderr.strip():
-        print(result.stderr.strip())
+        logger.error(result.stderr.strip())
 
 
 def detach_device(busid):
     """Detach a device via USBIP."""
     attached_ports = get_attached_ports()
     if busid not in attached_ports:
-        print(f"Device {busid} is not attached.")
+        logger.info(f"Device {busid} is not attached.")
         return
     port_id = attached_ports[busid]
-    print(f"Detaching {busid} (Port {port_id})...")
+    logger.info(f"Detaching {busid} (Port {port_id})...")
     result = subprocess.run(
         ["usbip", "detach", "-p", port_id],
         capture_output=True, text=True
     )
     time.sleep(0.2)
     if result.stdout.strip():
-        print(result.stdout.strip())
+        logger.info(result.stdout.strip())
     if result.stderr.strip():
-        print(result.stderr.strip())
+        logger.error(result.stderr.strip())
 
 
 class UsbipClient(asyncio.Protocol):
@@ -118,7 +129,7 @@ class UsbipClient(asyncio.Protocol):
 
     def connection_made(self, transport):
         self.transport = transport
-        print(f"Connected to {SOCKET_HOST}:{SOCKET_PORT}")
+        logger.info(f"Connected to {SOCKET_HOST}:{SOCKET_PORT}")
         transport.write(f"CLIENT_ID:{CLIENT_ID}\n".encode())
         transport.write(b'Client Echo\n')
 
@@ -132,29 +143,29 @@ class UsbipClient(asyncio.Protocol):
             if not message:
                 continue
 
-            print(f"Data received: {message}")
+            logger.info(f"Data received: {message}")
             if 'binded' in message:
                 parts = message.split()
                 if len(parts) >= 2:
                     deviceId = parts[-2]
-                    print(f"Binding {deviceId}...")
+                    logger.info(f"Binding {deviceId}...")
                     attached_ports = get_attached_ports()
                     if deviceId in attached_ports:
                         detach_device(deviceId)
                     if deviceId in list_bound_devices():
-                        print("Device available on server. Attaching...")
+                        logger.info("Device available on server. Attaching...")
                         attach_device(deviceId)
                     else:
-                        print("Device not available on server or already attached elsewhere.")
+                        logger.warning("Device not available on server or already attached elsewhere.")
             elif 'unbound' in message:
                 parts = message.split()
                 if len(parts) >= 2:
                     deviceId = parts[-2]
-                    print(f"Unbinding {deviceId}...")
+                    logger.info(f"Unbinding {deviceId}...")
                     detach_device(deviceId)
 
     def connection_lost(self, exc):
-        print('Connection lost, will retry...')
+        logger.warning('Connection lost, will retry...')
         self.on_disconnect()
 
 async def main():
@@ -172,7 +183,7 @@ async def main():
             )
             await reconnect_event.wait()
         except (ConnectionRefusedError, OSError):
-            print(f"Server not available, retrying in {RECONNECT_DELAY}s...")
+            logger.error(f"Server not available, retrying in {RECONNECT_DELAY}s...")
 
         await asyncio.sleep(RECONNECT_DELAY)
 
