@@ -4,10 +4,14 @@ import subprocess
 import re
 import sys
 import time
+import socket
 
 SOCKET_HOST = 'chikaraNeko.fritz.box'
 SOCKET_PORT = 65432
 RECONNECT_DELAY = 5  # seconds
+
+CLIENT_ID = socket.gethostname().strip().lower()
+print(f"Using hostname '{CLIENT_ID}' as client ID.")
 
 
 def parse_busids(usbip_output: str):
@@ -50,18 +54,17 @@ def get_attached_ports():
         result = subprocess.run(["usbip", "port"], capture_output=True, text=True, check=True)
         lines = result.stdout.splitlines()
         if "Imported USB devices" in result.stdout:
-            if "Imported USB devices" in result.stdout:
-                current_port_id = None
-                for line in lines:
-                    port_match = re.match(r'Port\s+(\d+):', line)
-                    if port_match:
-                        current_port_id = port_match.group(1)
-                        continue
-                    m = re.search(r'-> usbip://[^/]+/([\d-]+(\.[\d-]+)*)', line)
-                    if m and current_port_id:
-                        busid = m.group(1)
-                        ports[busid] = current_port_id
-                        current_port_id = None
+            current_port_id = None
+            for line in lines:
+                port_match = re.match(r'Port\s+(\d+):', line)
+                if port_match:
+                    current_port_id = port_match.group(1)
+                    continue
+                m = re.search(r'-> usbip://[^/]+/([\d-]+(\.[\d-]+)*)', line)
+                if m and current_port_id:
+                    busid = m.group(1)
+                    ports[busid] = current_port_id
+                    current_port_id = None
         else:
             for line in lines:
                 m = re.search(r'port\s+([\d]+):\s+<->\s+busid\s+([\d-]+(\.[\d-]+)*)', line)
@@ -116,7 +119,7 @@ class UsbipClient(asyncio.Protocol):
     def connection_made(self, transport):
         self.transport = transport
         print(f"Connected to {SOCKET_HOST}:{SOCKET_PORT}")
-        transport.write(b"CLIENT_ID:raion\n")
+        transport.write(f"CLIENT_ID:{CLIENT_ID}\n".encode())
         transport.write(b'Client Echo\n')
 
     def data_received(self, data):
