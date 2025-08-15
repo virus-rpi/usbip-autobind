@@ -87,6 +87,25 @@ def attach_device(busid):
         print(result.stderr.strip())
 
 
+def detach_device(busid):
+    """Detach a device via USBIP."""
+    attached_ports = get_attached_ports()
+    if busid not in attached_ports:
+        print(f"Device {busid} is not attached.")
+        return
+    port_id = attached_ports[busid]
+    print(f"Detaching {busid} (Port {port_id})...")
+    result = subprocess.run(
+        ["usbip", "detach", "-p", port_id],
+        capture_output=True, text=True
+    )
+    time.sleep(0.2)
+    if result.stdout.strip():
+        print(result.stdout.strip())
+    if result.stderr.strip():
+        print(result.stderr.strip())
+
+
 class UsbipClient(asyncio.Protocol):
     def __init__(self, on_disconnect):
         super().__init__()
@@ -118,23 +137,18 @@ class UsbipClient(asyncio.Protocol):
                     print(f"Binding {deviceId}...")
                     attached_ports = get_attached_ports()
                     if deviceId in attached_ports:
-                        port_id = attached_ports[deviceId]
-                        print(f"Device {deviceId} already attached on port {port_id}. Detaching...")
-                        try:
-                            subprocess.run(
-                                ["usbip", "detach", "-p", port_id],
-                                capture_output=True, text=True, check=True
-                            )
-                            print("Successfully detached.")
-                            time.sleep(0.5)
-                        except subprocess.CalledProcessError as e:
-                            print(f"Failed to detach from port {port_id}: {e.stderr.strip()}")
-                            continue
+                        detach_device(deviceId)
                     if deviceId in list_bound_devices():
                         print("Device available on server. Attaching...")
                         attach_device(deviceId)
                     else:
                         print("Device not available on server or already attached elsewhere.")
+            elif 'unbound' in message:
+                parts = message.split()
+                if len(parts) >= 2:
+                    deviceId = parts[-2]
+                    print(f"Unbinding {deviceId}...")
+                    detach_device(deviceId)
 
     def connection_lost(self, exc):
         print('Connection lost, will retry...')

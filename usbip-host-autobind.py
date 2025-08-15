@@ -167,6 +167,7 @@ def force_free(busid: str):
     prev = DEVICE_IN_USE.pop(busid, None)
     if prev:
         logger.info(f"Forcing {busid} free from client {prev}")
+        main_loop.call_soon_threadsafe(asyncio.create_task, send_to_client(prev, f"Device {busid} unbound\n"))
     usbip_unbind(busid)
     time.sleep(0.2)
     if usbip_bind(busid):
@@ -524,13 +525,17 @@ async def assign_all(client_id: str = Query(...)):
     global ASSIGN_ALL_CLIENT_ID
     if client_id == "none":
         ASSIGN_ALL_CLIENT_ID = None
-        # Unassign all devices
         for busid in list(DEVICE_ASSIGNMENTS.keys()):
+            force_free(busid)
             DEVICE_ASSIGNMENTS.pop(busid, None)
             DEVICE_IN_USE.pop(busid, None)
         return JSONResponse({"status": "cleared"})
     ASSIGN_ALL_CLIENT_ID = client_id
-    # Assign all devices to this client
+
+    for busid in list(deviceBindSet):
+        if busid in DEVICE_ASSIGNMENTS and DEVICE_ASSIGNMENTS[busid] != client_id:
+            force_free(busid)
+
     for busid in list(deviceBindSet):
         DEVICE_ASSIGNMENTS[busid] = client_id
         await send_to_client(client_id, f"Device {busid} binded\n")
