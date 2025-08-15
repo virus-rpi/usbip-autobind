@@ -3,6 +3,7 @@ import asyncio
 import subprocess
 import re
 import sys
+import time
 
 SOCKET_HOST = 'chikaraNeko.fritz.box'
 SOCKET_PORT = 65432
@@ -13,11 +14,11 @@ def parse_busids(usbip_output: str):
     """Extract bus IDs from usbip list output for both Linux and Windows formats."""
     busids = []
     for line in usbip_output.splitlines():
-        m1 = re.search(r'busid\s+([\d-]+)', line)
+        m1 = re.search(r'busid\s+([\d-]+(\.[\d-]+)*)', line)
         if m1:
             busids.append(m1.group(1))
             continue
-        m2 = re.match(r'\s*([\d-]+)\s*:', line)
+        m2 = re.match(r'\s*([\d-]+(\.[\d-]+)*)\s*:', line)
         if m2:
             busids.append(m2.group(1))
     return busids
@@ -40,6 +41,38 @@ def list_bound_devices():
 
     return parse_busids(result.stdout)
 
+def get_attached_ports():
+    """
+    Get a mapping of port IDs to bus IDs for locally attached devices.
+    """
+    ports = {}
+    try:
+        result = subprocess.run(["usbip", "port"], capture_output=True, text=True, check=True)
+        lines = result.stdout.splitlines()
+        if "Imported USB devices" in result.stdout:
+            if "Imported USB devices" in result.stdout:
+                current_port_id = None
+                for line in lines:
+                    port_match = re.match(r'Port\s+(\d+):', line)
+                    if port_match:
+                        current_port_id = port_match.group(1)
+                        continue
+                    m = re.search(r'-> usbip://[^/]+/([\d-]+(\.[\d-]+)*)', line)
+                    if m and current_port_id:
+                        busid = m.group(1)
+                        ports[busid] = current_port_id
+                        current_port_id = None
+        else:
+            for line in lines:
+                m = re.search(r'port\s+([\d]+):\s+<->\s+busid\s+([\d-]+(\.[\d-]+)*)', line)
+                if m:
+                    port_id = m.group(1)
+                    busid = m.group(2)
+                    ports[busid] = port_id
+    except (FileNotFoundError, subprocess.CalledProcessError):
+        pass
+    return ports
+
 
 def attach_device(busid):
     """Attach to a device via USBIP."""
@@ -59,23 +92,49 @@ class UsbipClient(asyncio.Protocol):
         super().__init__()
         self.transport = None
         self.on_disconnect = on_disconnect
+        self.buffer = b''
 
     def connection_made(self, transport):
         self.transport = transport
         print(f"Connected to {SOCKET_HOST}:{SOCKET_PORT}")
         transport.write(b"CLIENT_ID:raion\n")
-        transport.write(b'Client Echo')
+        transport.write(b'Client Echo\n')
 
     def data_received(self, data):
-        message = data.decode().strip()
-        print(f"Data received: {message}")
-        if 'binded' in message:
-            parts = message.split()
-            if len(parts) >= 2:
-                deviceId = parts[-2]
-                print(f"Newly bound device: {deviceId}")
-                if deviceId in list_bound_devices():
-                    attach_device(deviceId)
+        self.buffer += data
+
+        while b'\n' in self.buffer:
+            line, self.buffer = self.buffer.split(b'\n', 1)
+            message = line.decode().strip()
+
+            if not message:
+                continue
+
+            print(f"Data received: {message}")
+            if 'binded' in message:
+                parts = message.split()
+                if len(parts) >= 2:
+                    deviceId = parts[-2]
+                    print(f"Binding {deviceId}...")
+                    attached_ports = get_attached_ports()
+                    if deviceId in attached_ports:
+                        port_id = attached_ports[deviceId]
+                        print(f"Device {deviceId} already attached on port {port_id}. Detaching...")
+                        try:
+                            subprocess.run(
+                                ["usbip", "detach", "-p", port_id],
+                                capture_output=True, text=True, check=True
+                            )
+                            print("Successfully detached.")
+                            time.sleep(0.5)
+                        except subprocess.CalledProcessError as e:
+                            print(f"Failed to detach from port {port_id}: {e.stderr.strip()}")
+                            continue
+                    if deviceId in list_bound_devices():
+                        print("Device available on server. Attaching...")
+                        attach_device(deviceId)
+                    else:
+                        print("Device not available on server or already attached elsewhere.")
 
     def connection_lost(self, exc):
         print('Connection lost, will retry...')

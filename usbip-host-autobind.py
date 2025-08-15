@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+#!/usr/bin/python3
 import json
 import os
 import asyncio
@@ -13,6 +13,42 @@ from fastapi.responses import HTMLResponse, JSONResponse
 import uvicorn
 from contextlib import asynccontextmanager
 
+# --- Logging setup ---
+logger = logging.getLogger("usbip-host-autobind")
+logger.setLevel(logging.INFO)
+if not logger.hasHandlers():
+    handler = logging.StreamHandler()
+    formatter = logging.Formatter('[%(asctime)s] %(levelname)s: %(message)s', datefmt='%Y-%m-%d %H:%M:%S')
+    handler.setFormatter(formatter)
+    logger.addHandler(handler)
+
+# ------------------ Persistence support ------------------
+
+class PersistentDict(dict):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.loaded = False
+    def __setitem__(self, key, value):
+        super().__setitem__(key, value)
+        save_assignments()
+    def __delitem__(self, key):
+        super().__delitem__(key)
+        save_assignments()
+    def update(self, *args, **kwargs):
+        if args:
+            super().update(args[0], **kwargs)
+        else:
+            super().update(**kwargs)
+        save_assignments()
+    def pop(self, *args, **kwargs):
+        result = super().pop(*args, **kwargs)
+        save_assignments()
+        return result
+    def clear(self):
+        super().clear()
+        save_assignments()
+
+
 # --- Network & Web config ---
 SOCKET_HOST = '0.0.0.0'
 SOCKET_PORT = 65432
@@ -22,13 +58,42 @@ WEB_PORT = 8080
 # --- USB ports to watch (adjust with `lsusb -t` if needed) ---
 PHYSICAL_PORTS = ["1-1", "3-1", "1-2", "3-2"]
 
+ASSIGNMENTS_FILE = os.path.join(os.path.dirname(__file__), "assignments.json")
+
 # --- State ---
 deviceBindSet: Set[str] = set()  # Devices currently bound to usbip-host (exported)
 CLIENTS: Dict[str, asyncio.StreamWriter] = {}  # client_id -> writer
 WRITER_TO_ID: Dict[asyncio.StreamWriter, str] = {}
-DEVICE_ASSIGNMENTS: Dict[str, str] = {}  # busid -> target client_id (desired owner)
+DEVICE_ASSIGNMENTS: Dict[str, str] = PersistentDict()  # busid -> target client_id (desired owner)
 DEVICE_IN_USE: Dict[str, str] = {}  # busid -> client_id currently using it
 DEVICE_NAMES: Dict[str, str] = {}  # busid -> device name
+ASSIGN_ALL_CLIENT_ID: str = "none"  # If set, all devices are assigned to this client
+
+def save_assignments():
+    try:
+        tmpfile = ASSIGNMENTS_FILE + ".tmp"
+        with open(tmpfile, "w") as f:
+            json.dump({
+                "assign_all_client_id": ASSIGN_ALL_CLIENT_ID,
+                "device_assignments": DEVICE_ASSIGNMENTS
+            }, f)
+        os.replace(tmpfile, ASSIGNMENTS_FILE)
+    except Exception as e:
+        logger.warning(f"Failed to save assignments: {e}")
+
+def load_assignments():
+    global ASSIGN_ALL_CLIENT_ID, DEVICE_ASSIGNMENTS
+    try:
+        with open(ASSIGNMENTS_FILE, "r") as f:
+            data = json.load(f)
+            ASSIGN_ALL_CLIENT_ID = data.get("assign_all_client_id")
+            DEVICE_ASSIGNMENTS.clear()
+            DEVICE_ASSIGNMENTS.update(data.get("device_assignments", {}))
+        logger.info(f"Loaded assignments from {ASSIGNMENTS_FILE}")
+    except FileNotFoundError:
+        pass
+    except Exception as e:
+        logger.warning(f"Failed to load assignments: {e}")
 
 # --- asyncio loop reference ---
 main_loop = asyncio.get_event_loop()
@@ -37,16 +102,6 @@ main_loop = asyncio.get_event_loop()
 context = Context()
 monitor = Monitor.from_netlink(context)
 monitor.filter_by(subsystem='usb')
-
-
-# --- Logging setup ---
-logger = logging.getLogger("usbip-host-autobind")
-logger.setLevel(logging.INFO)
-if not logger.hasHandlers():
-    handler = logging.StreamHandler()
-    formatter = logging.Formatter('[%(asctime)s] %(levelname)s: %(message)s', datefmt='%Y-%m-%d %H:%M:%S')
-    handler.setFormatter(formatter)
-    logger.addHandler(handler)
 
 
 # ------------------ USB helpers ------------------
@@ -186,7 +241,11 @@ def print_device_event(device):
     if action == 'add':
         logger.info(f"New device on {busid}: binding & notifying...")
         ensure_bound(busid)
-        main_loop.call_soon_threadsafe(asyncio.create_task, notify_bound_to_assigned(busid))
+        if ASSIGN_ALL_CLIENT_ID and ASSIGN_ALL_CLIENT_ID in CLIENTS:
+            DEVICE_ASSIGNMENTS[busid] = ASSIGN_ALL_CLIENT_ID
+            main_loop.call_soon_threadsafe(lambda: asyncio.create_task(notify_bound_to_assigned(busid)))
+        else:
+            main_loop.call_soon_threadsafe(lambda: asyncio.create_task(notify_bound_to_assigned(busid)))
     elif action == 'remove':
         if busid in deviceBindSet:
             logger.info(f"Device {busid} removed")
@@ -238,6 +297,17 @@ async def handle_client(reader: asyncio.StreamReader, writer: asyncio.StreamWrit
                 logger.info(f"Assigned {busid} to {client_id}")
             except (ConnectionResetError, OSError):
                 pass
+    if not ASSIGN_ALL_CLIENT_ID:
+        for busid in sorted(deviceBindSet):
+            if busid not in DEVICE_ASSIGNMENTS:
+                DEVICE_ASSIGNMENTS[busid] = client_id
+                try:
+                    writer.write(f"Device {busid} binded\n".encode())
+                    DEVICE_IN_USE[busid] = client_id
+                    await writer.drain()
+                    logger.info(f"Auto-assigned {busid} to {client_id} (new client)")
+                except (ConnectionResetError, OSError):
+                    pass
     try:
         await writer.drain()
     except (ConnectionResetError, OSError):
@@ -345,6 +415,24 @@ async def index():
         </pre>
         """
 
+    assign_all_controls = ""
+    if CLIENTS:
+        options = []
+        selected_none = 'selected' if not ASSIGN_ALL_CLIENT_ID else ''
+        options.append(f'<option value="none" {selected_none}>none</option>')
+        for cid in sorted(CLIENTS.keys()):
+            selected = 'selected' if ASSIGN_ALL_CLIENT_ID == cid else ''
+            options.append(f'<option value="{cid}" {selected}>{cid}</option>')
+        options_html = ''.join(options)
+        assign_all_controls = f'''
+        <h3>Assign All Devices</h3>
+        <select id="assignAllClient">
+            {options_html}
+        </select>
+        <button onclick="assignAll()">Assign All</button>
+        <span style='margin-left:10px;color:#888;'>{'Current: ' + (ASSIGN_ALL_CLIENT_ID or 'none')}</span>
+        '''
+
     html = f"""
 <!doctype html>
 <html>
@@ -364,6 +452,8 @@ select {{ padding: 4px; }}
 </head>
 <body>
 <h1>USBIP Device Manager</h1>
+
+{assign_all_controls}
 
 <h2>Connected Clients <span class="badge">{len(CLIENTS)}</span></h2>
 <ul>{client_list or "<li>(none)</li>"}</ul>
@@ -390,6 +480,12 @@ async function forceFree(busid){{
 async function forceReattach(busid){{
   const r = await fetch(`/force_reattach?busid=${{encodeURIComponent(busid)}}`);
   if(!r.ok) alert('Force reattach failed');
+  location.reload();
+}}
+async function assignAll(){{
+  const client_id = document.getElementById('assignAllClient').value;
+  const r = await fetch(`/assign_all?client_id=${{encodeURIComponent(client_id)}}`);
+  if(!r.ok) alert('Assign all failed');
   location.reload();
 }}
 </script>
@@ -423,6 +519,25 @@ async def assign(busid: str = Query(...), client_id: str = Query(...)):
         return JSONResponse({"status": "queued-for-client"})
 
 
+@app.get("/assign_all")
+async def assign_all(client_id: str = Query(...)):
+    global ASSIGN_ALL_CLIENT_ID
+    if client_id == "none":
+        ASSIGN_ALL_CLIENT_ID = None
+        # Unassign all devices
+        for busid in list(DEVICE_ASSIGNMENTS.keys()):
+            DEVICE_ASSIGNMENTS.pop(busid, None)
+            DEVICE_IN_USE.pop(busid, None)
+        return JSONResponse({"status": "cleared"})
+    ASSIGN_ALL_CLIENT_ID = client_id
+    # Assign all devices to this client
+    for busid in list(deviceBindSet):
+        DEVICE_ASSIGNMENTS[busid] = client_id
+        await send_to_client(client_id, f"Device {busid} binded\n")
+        DEVICE_IN_USE[busid] = client_id
+    return JSONResponse({"status": "assigned", "client_id": client_id})
+
+
 @app.get("/force_free")
 async def api_force_free(busid: str = Query(...)):
     if busid not in deviceBindSet:
@@ -441,13 +556,13 @@ async def api_force_reattach(busid: str = Query(...)):
     main_loop.call_soon_threadsafe(asyncio.create_task, notify_bound_to_assigned(busid))
     return JSONResponse({"status": "reattached"})
 
-
 # ------------------ Main runner ------------------
 
 async def main():
     """
     Runs the USBIP control socket and the web server.
     """
+    load_assignments()
     scan_existing_devices()
     socket_server = await run_socket_server()
     socket_task = asyncio.create_task(socket_server.serve_forever())
