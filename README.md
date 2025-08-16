@@ -1,6 +1,6 @@
 # usbip-autobind
 
-**usbip-autobind** is a Python script designed to automatically bind all attached USB devices to the [usbip](https://github.com/usbip/usbip) driver, making it easy to share USB devices over IP. 
+**usbip-autobind** is a Python script designed to automatically bind all attached USB devices to the [usbip](https://github.com/usbip/usbip) driver, making it easy to share USB devices over IP. I use this to so I can use the same periferals for multiple devices without repluging cables every time i switch. Instead I just have one USB hub connected to a raspberry pi hosting this and i have the client on all my other devices.
 
 I originally used https://github.com/mozram/usbip-autobind but i wanted more functionality so i expanded it.
 
@@ -9,10 +9,15 @@ I originally used https://github.com/mozram/usbip-autobind but i wanted more fun
 ## Features
 
 - **Automatic USB Device Binding**: Detects all attached USB devices and binds them to the usbip driver.
-- **Easy Integration**: Simple to run, no complicated setup required.
-- **Cross-Platform**: Tested on host on Raspbian and client Arch and Windows 11.
+- **Perfect for multiple clients**: The host can handle as many clients as you want and assign any USB device to any client.
+- **Easy Integration**: Simple to run, no complicated setup required (except you consider creating services to run in the background complicated)
+- **Cross-Platform**: Tested on host on Raspbian and client on Arch and Windows 11.
 - **Verbose Logging**: Provides detailed output for troubleshooting and monitoring.
-- **Web UI**: Provides a webui to configure which client gets which USB device
+- **Web UI**: Provides a webui to configure which client gets which USB device.
+- **API**: Provides an API to do the same stuff as the webui if you want to automate stuff.
+- **Whitelist**: Only touches USB ports you allowed it to use.
+- **Stable**: Automatic freeing of drivers if something fails or connection retries etc ensure the your usb connections stay attached.
+- **Persistent State**: The host memorizes which USB devices were assigned to which client even between reboots and automatically attaches them again.
 
 ---
 
@@ -222,6 +227,9 @@ Alternatively you can run the script directly with `python usbip-client-autobind
 
 - **usbip Not Found:**  
   Make sure `usbip` is installed and available in your system's PATH.
+
+- **The USB device doesnt show up in the list**:
+  Make sure the port you pluged it in is on the whitelist.
 
 - A lot of different errors can occur on linux if you dont properly install the kernel modules. Make sure you execute `modprobe usbip-core usbip-host`
 - For connectiong issues check the host ip in the client script and check if a firewall is blocking something
