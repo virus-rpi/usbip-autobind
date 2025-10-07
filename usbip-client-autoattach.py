@@ -1,11 +1,12 @@
 #!/usr/bin/env python3
 import asyncio
-import subprocess
+import logging
 import re
+import socket
+import subprocess
 import sys
 import time
-import socket
-import logging
+from asyncio import WriteTransport
 
 logger = logging.getLogger("usbip-client")
 logger.setLevel(logging.INFO)
@@ -24,22 +25,22 @@ CLIENT_ID = socket.gethostname().strip().lower()
 logger.info(f"Using hostname '{CLIENT_ID}' as client ID.")
 
 
-def parse_busids(usbip_output: str):
+def parse_bus_ids(usbip_output: str):
     """Extract bus IDs from usbip list output for both Linux and Windows formats."""
-    busids = []
+    bus_ids = []
     for line in usbip_output.splitlines():
         m1 = re.search(r'busid\s+([\d-]+(\.[\d-]+)*)', line)
         if m1:
-            busids.append(m1.group(1))
+            bus_ids.append(m1.group(1))
             continue
         m2 = re.match(r'\s*([\d-]+(\.[\d-]+)*)\s*:', line)
         if m2:
-            busids.append(m2.group(1))
-    return busids
+            bus_ids.append(m2.group(1))
+    return bus_ids
 
 
 def list_bound_devices():
-    """Run `usbip list -r` and return all bound device busids."""
+    """Run `usbip list -r` and return all bound device bus ids."""
     try:
         result = subprocess.run(
             ["usbip", "list", "-r", SOCKET_HOST],
@@ -53,7 +54,7 @@ def list_bound_devices():
         logger.error(f"usbip list failed: {result.stderr.strip()}")
         return []
 
-    return parse_busids(result.stdout)
+    return parse_bus_ids(result.stdout)
 
 
 def get_attached_ports():
@@ -73,26 +74,26 @@ def get_attached_ports():
                     continue
                 m = re.search(r'-> usbip://[^/]+/([\d-]+(\.[\d-]+)*)', line)
                 if m and current_port_id:
-                    busid = m.group(1)
-                    ports[busid] = current_port_id
+                    bus_id = m.group(1)
+                    ports[bus_id] = current_port_id
                     current_port_id = None
         else:
             for line in lines:
-                m = re.search(r'port\s+([\d]+):\s+<->\s+busid\s+([\d-]+(\.[\d-]+)*)', line)
+                m = re.search(r'port\s+(\d+):\s+<->\s+busid\s+([\d-]+(\.[\d-]+)*)', line)
                 if m:
                     port_id = m.group(1)
-                    busid = m.group(2)
-                    ports[busid] = port_id
+                    bus_id = m.group(2)
+                    ports[bus_id] = port_id
     except (FileNotFoundError, subprocess.CalledProcessError):
         pass
     return ports
 
 
-def attach_device(busid):
+def attach_device(bus_id):
     """Attach to a device via USBIP."""
-    logger.info(f"Attaching to {busid}...")
+    logger.info(f"Attaching to {bus_id}...")
     result = subprocess.run(
-        ["usbip", "attach", "-r", SOCKET_HOST, "-b", busid],
+        ["usbip", "attach", "-r", SOCKET_HOST, "-b", bus_id],
         capture_output=True, text=True
     )
     if result.stdout.strip():
@@ -101,14 +102,14 @@ def attach_device(busid):
         logger.error(result.stderr.strip())
 
 
-def detach_device(busid):
+def detach_device(bus_id):
     """Detach a device via USBIP."""
     attached_ports = get_attached_ports()
-    if busid not in attached_ports:
-        logger.info(f"Device {busid} is not attached.")
+    if bus_id not in attached_ports:
+        logger.info(f"Device {bus_id} is not attached.")
         return
-    port_id = attached_ports[busid]
-    logger.info(f"Detaching {busid} (Port {port_id})...")
+    port_id = attached_ports[bus_id]
+    logger.info(f"Detaching {bus_id} (Port {port_id})...")
     result = subprocess.run(
         ["usbip", "detach", "-p", port_id],
         capture_output=True, text=True
@@ -127,8 +128,8 @@ class UsbipClient(asyncio.Protocol):
         self.on_disconnect = on_disconnect
         self.buffer = b''
 
-    def connection_made(self, transport):
-        self.transport = transport
+    def connection_made(self, transport: WriteTransport):
+        self.transport: WriteTransport = transport
         logger.info(f"Connected to {SOCKET_HOST}:{SOCKET_PORT}")
         transport.write(f"CLIENT_ID:{CLIENT_ID}\n".encode())
         transport.write(b'Client Echo\n')
@@ -144,25 +145,25 @@ class UsbipClient(asyncio.Protocol):
                 continue
 
             logger.info(f"Data received: {message}")
-            if 'binded' in message:
+            if 'bound' in message:
                 parts = message.split()
                 if len(parts) >= 2:
-                    deviceId = parts[-2]
-                    logger.info(f"Binding {deviceId}...")
+                    device_id = parts[-2]
+                    logger.info(f"Binding {device_id}...")
                     attached_ports = get_attached_ports()
-                    if deviceId in attached_ports:
-                        detach_device(deviceId)
-                    if deviceId in list_bound_devices():
+                    if device_id in attached_ports:
+                        detach_device(device_id)
+                    if device_id in list_bound_devices():
                         logger.info("Device available on server. Attaching...")
-                        attach_device(deviceId)
+                        attach_device(device_id)
                     else:
                         logger.warning("Device not available on server or already attached elsewhere.")
             elif 'unbound' in message:
                 parts = message.split()
                 if len(parts) >= 2:
-                    deviceId = parts[-2]
-                    logger.info(f"Unbinding {deviceId}...")
-                    detach_device(deviceId)
+                    device_id = parts[-2]
+                    logger.info(f"Unbinding {device_id}...")
+                    detach_device(device_id)
 
     def connection_lost(self, exc):
         logger.warning('Connection lost, will retry...')

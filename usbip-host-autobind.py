@@ -1,17 +1,17 @@
 #!/usr/bin/python3
-import json
-import os
 import asyncio
+import json
+import logging
+import os
 import subprocess
 import time
+from contextlib import asynccontextmanager
 from typing import Dict, Set
-import logging
 
-from pyudev import Context, Monitor, MonitorObserver
+import uvicorn
 from fastapi import FastAPI, Query
 from fastapi.responses import HTMLResponse, JSONResponse
-import uvicorn
-from contextlib import asynccontextmanager
+from pyudev import Context, Monitor, MonitorObserver
 
 # --- Logging setup ---
 logger = logging.getLogger("usbip-host-autobind")
@@ -64,20 +64,20 @@ ASSIGNMENTS_FILE = os.path.join(os.path.dirname(__file__), "assignments.json")
 deviceBindSet: Set[str] = set()  # Devices currently bound to usbip-host (exported)
 CLIENTS: Dict[str, asyncio.StreamWriter] = {}  # client_id -> writer
 WRITER_TO_ID: Dict[asyncio.StreamWriter, str] = {}
-DEVICE_ASSIGNMENTS: Dict[str, str] = PersistentDict()  # busid -> target client_id (desired owner)
-DEVICE_IN_USE: Dict[str, str] = {}  # busid -> client_id currently using it
-DEVICE_NAMES: Dict[str, str] = {}  # busid -> device name
+DEVICE_ASSIGNMENTS: Dict[str, str] = PersistentDict()  # bus_id -> target client_id (desired owner)
+DEVICE_IN_USE: Dict[str, str] = {}  # bus_id -> client_id currently using it
+DEVICE_NAMES: Dict[str, str] = {}  # bus_id -> device name
 ASSIGN_ALL_CLIENT_ID: str = "none"  # If set, all devices are assigned to this client
 
 def save_assignments():
     try:
-        tmpfile = ASSIGNMENTS_FILE + ".tmp"
-        with open(tmpfile, "w") as f:
+        tmp_file = ASSIGNMENTS_FILE + ".tmp"
+        with open(tmp_file, "w") as f:
             json.dump({
                 "assign_all_client_id": ASSIGN_ALL_CLIENT_ID,
                 "device_assignments": DEVICE_ASSIGNMENTS
             }, f)
-        os.replace(tmpfile, ASSIGNMENTS_FILE)
+        os.replace(tmp_file, ASSIGNMENTS_FILE)
     except Exception as e:
         logger.warning(f"Failed to save assignments: {e}")
 
@@ -106,75 +106,75 @@ monitor.filter_by(subsystem='usb')
 
 # ------------------ USB helpers ------------------
 
-def get_device_name(busid: str) -> str:
-    """Try to read product name from sysfs."""
-    path = f"/sys/bus/usb/devices/{busid}/product"
+def get_device_name(bus_id: str) -> str:
+    """Try to read the product name from sysfs."""
+    path = f"/sys/bus/usb/devices/{bus_id}/product"
     if os.path.exists(path):
         try:
             with open(path, "r") as f:
                 return f.read().strip()
         except (OSError, PermissionError):
-            return busid
-    return busid
+            return bus_id
+    return bus_id
 
 
-def unbind_current_driver(busid: str):
-    driver_path = f"/sys/bus/usb/devices/{busid}/driver"
+def unbind_current_driver(bus_id: str):
+    driver_path = f"/sys/bus/usb/devices/{bus_id}/driver"
     if os.path.islink(driver_path):
         driver_name = os.path.basename(os.readlink(driver_path))
         try:
             with open(f"/sys/bus/usb/drivers/{driver_name}/unbind", "w") as f:
-                f.write(busid)
-            logger.info(f"Unbound {busid} from {driver_name}")
+                f.write(bus_id)
+            logger.info(f"Unbound {bus_id} from {driver_name}")
         except subprocess.CalledProcessError as e:
-            logger.warning(f"Failed to unbind {busid} from {driver_name}: {e}")
+            logger.warning(f"Failed to unbind {bus_id} from {driver_name}: {e}")
     else:
-        logger.info(f"No driver bound for {busid}")
+        logger.info(f"No driver bound for {bus_id}")
 
 
-def usbip_bind(busid: str) -> bool:
-    driver_path = f"/sys/bus/usb/devices/{busid}/driver"
+def usbip_bind(bus_id: str) -> bool:
+    driver_path = f"/sys/bus/usb/devices/{bus_id}/driver"
     if os.path.islink(driver_path) and os.path.basename(os.readlink(driver_path)) == 'usbip-host':
-        logger.info(f"Already bound {busid} to usbip-host")
+        logger.info(f"Already bound {bus_id} to usbip-host")
         return True
     try:
-        subprocess.run(["usbip", "bind", "-b", busid], capture_output=True, text=True, check=True)
-        logger.info(f"Bound {busid} to usbip-host")
+        subprocess.run(["usbip", "bind", "-b", bus_id], capture_output=True, text=True, check=True)
+        logger.info(f"Bound {bus_id} to usbip-host")
         return True
     except subprocess.CalledProcessError as e:
-        logger.warning(f"usbip bind failed for {busid}: {e.stderr.strip() or e.stdout.strip()}")
+        logger.warning(f"usbip bind failed for {bus_id}: {e.stderr.strip() or e.stdout.strip()}")
         return False
     except FileNotFoundError:
         logger.error("usbip command not found. Is the usbip-tools package installed?")
         return False
 
 
-def usbip_unbind(busid: str):
-    res = subprocess.run(["usbip", "unbind", "-b", busid], capture_output=True, text=True)
+def usbip_unbind(bus_id: str):
+    res = subprocess.run(["usbip", "unbind", "-b", bus_id], capture_output=True, text=True)
     if res.returncode != 0:
-        logger.info(f"usbip unbind for {busid}: {res.stderr.strip() or res.stdout.strip()}")
+        logger.info(f"usbip unbind for {bus_id}: {res.stderr.strip() or res.stdout.strip()}")
 
 
-def ensure_bound(busid: str):
-    if busid in deviceBindSet:
+def ensure_bound(bus_id: str):
+    if bus_id in deviceBindSet:
         return
-    if usbip_bind(busid):
-        deviceBindSet.add(busid)
-        DEVICE_NAMES[busid] = get_device_name(busid)
+    if usbip_bind(bus_id):
+        deviceBindSet.add(bus_id)
+        DEVICE_NAMES[bus_id] = get_device_name(bus_id)
 
 
-def force_free(busid: str):
-    prev = DEVICE_IN_USE.pop(busid, None)
+def force_free(bus_id: str):
+    prev = DEVICE_IN_USE.pop(bus_id, None)
     if prev:
-        logger.info(f"Forcing {busid} free from client {prev}")
-        main_loop.call_soon_threadsafe(asyncio.create_task, send_to_client(prev, f"Device {busid} unbound\n"))
-    usbip_unbind(busid)
+        logger.info(f"Forcing {bus_id} free from client {prev}")
+        main_loop.call_soon_threadsafe(asyncio.create_task, send_to_client(prev, f"Device {bus_id} unbound\n"))
+    usbip_unbind(bus_id)
     time.sleep(0.2)
-    if usbip_bind(busid):
-        deviceBindSet.add(busid)
-        DEVICE_NAMES[busid] = get_device_name(busid)
+    if usbip_bind(bus_id):
+        deviceBindSet.add(bus_id)
+        DEVICE_NAMES[bus_id] = get_device_name(bus_id)
     else:
-        deviceBindSet.discard(busid)
+        deviceBindSet.discard(bus_id)
 
 
 # ------------------ Socket helpers ------------------
@@ -199,14 +199,14 @@ async def send_to_client(client_id: str, message: str) -> bool:
         return False
 
 
-async def notify_bound_to_assigned(busid: str):
-    target = DEVICE_ASSIGNMENTS.get(busid)
+async def notify_bound_to_assigned(bus_id: str):
+    target = DEVICE_ASSIGNMENTS.get(bus_id)
     if not target or target == "none":
         return
-    delivered = await send_to_client(target, f"Device {busid} binded\n")
+    delivered = await send_to_client(target, f"Device {bus_id} bound\n")
     if delivered:
-        DEVICE_IN_USE[busid] = target
-        logger.info(f"Notified {target} to attach {busid} (marked in use).")
+        DEVICE_IN_USE[bus_id] = target
+        logger.info(f"Notified {target} to attach {bus_id} (marked in use).")
 
 
 # ------------------ Binding logic entrypoints ------------------
@@ -232,36 +232,36 @@ def print_device_event(device):
     action = device.action
     if ':' in device_path:
         return
-    busid = os.path.basename(device_path)
+    bus_id = os.path.basename(device_path)
 
-    if not any(busid.startswith(port) for port in PHYSICAL_PORTS):
+    if not any(bus_id.startswith(port) for port in PHYSICAL_PORTS):
         return
 
     logger.info(f"Device event: {device_path} {action}")
 
     if action == 'add':
-        logger.info(f"New device on {busid}: binding & notifying...")
-        ensure_bound(busid)
+        logger.info(f"New device on {bus_id}: binding & notifying...")
+        ensure_bound(bus_id)
         if ASSIGN_ALL_CLIENT_ID and ASSIGN_ALL_CLIENT_ID in CLIENTS:
-            DEVICE_ASSIGNMENTS[busid] = ASSIGN_ALL_CLIENT_ID
-            main_loop.call_soon_threadsafe(lambda: asyncio.create_task(notify_bound_to_assigned(busid)))
+            DEVICE_ASSIGNMENTS[bus_id] = ASSIGN_ALL_CLIENT_ID
+            main_loop.call_soon_threadsafe(asyncio.create_task, notify_bound_to_assigned(bus_id))
         else:
-            main_loop.call_soon_threadsafe(lambda: asyncio.create_task(notify_bound_to_assigned(busid)))
+            main_loop.call_soon_threadsafe(asyncio.create_task, notify_bound_to_assigned(bus_id))
     elif action == 'remove':
-        if busid in deviceBindSet:
-            logger.info(f"Device {busid} removed")
-            deviceBindSet.discard(busid)
-        DEVICE_ASSIGNMENTS.pop(busid, None)
-        DEVICE_IN_USE.pop(busid, None)
+        if bus_id in deviceBindSet:
+            logger.info(f"Device {bus_id} removed")
+            deviceBindSet.discard(bus_id)
+        DEVICE_ASSIGNMENTS.pop(bus_id, None)
+        DEVICE_IN_USE.pop(bus_id, None)
         for cid in list(CLIENTS.keys()):
-            main_loop.call_soon_threadsafe(asyncio.create_task, send_to_client(cid, f"Device {busid} removed\n"))
+            main_loop.call_soon_threadsafe(asyncio.create_task, send_to_client(cid, f"Device {bus_id} removed\n"))
 
 def cleanup():
     """Unbind all exported USBIP devices."""
     logger.info("Starting cleanup: unbinding all devices...")
-    for busid in list(deviceBindSet):
-        usbip_unbind(busid)
-        deviceBindSet.discard(busid)
+    for bus_id in list(deviceBindSet):
+        usbip_unbind(bus_id)
+        deviceBindSet.discard(bus_id)
     logger.info("Cleanup complete.")
 
 observer = MonitorObserver(monitor, callback=print_device_event)
@@ -289,24 +289,24 @@ async def handle_client(reader: asyncio.StreamReader, writer: asyncio.StreamWrit
     WRITER_TO_ID[writer] = client_id
     logger.info(f"Registered client ID: {client_id}")
 
-    for busid in sorted(deviceBindSet):
-        if DEVICE_ASSIGNMENTS.get(busid) == client_id and not DEVICE_IN_USE.get(busid):
+    for bus_id in sorted(deviceBindSet):
+        if DEVICE_ASSIGNMENTS.get(bus_id) == client_id and not DEVICE_IN_USE.get(bus_id):
             try:
-                writer.write(f"Device {busid} binded\n".encode())
-                DEVICE_IN_USE[busid] = client_id
+                writer.write(f"Device {bus_id} bound\n".encode())
+                DEVICE_IN_USE[bus_id] = client_id
                 await writer.drain()
-                logger.info(f"Assigned {busid} to {client_id}")
+                logger.info(f"Assigned {bus_id} to {client_id}")
             except (ConnectionResetError, OSError):
                 pass
     if not ASSIGN_ALL_CLIENT_ID:
-        for busid in sorted(deviceBindSet):
-            if busid not in DEVICE_ASSIGNMENTS:
-                DEVICE_ASSIGNMENTS[busid] = client_id
+        for bus_id in sorted(deviceBindSet):
+            if bus_id not in DEVICE_ASSIGNMENTS:
+                DEVICE_ASSIGNMENTS[bus_id] = client_id
                 try:
-                    writer.write(f"Device {busid} binded\n".encode())
-                    DEVICE_IN_USE[busid] = client_id
+                    writer.write(f"Device {bus_id} bound\n".encode())
+                    DEVICE_IN_USE[bus_id] = client_id
                     await writer.drain()
-                    logger.info(f"Auto-assigned {busid} to {client_id} (new client)")
+                    logger.info(f"Auto-assigned {bus_id} to {client_id} (new client)")
                 except (ConnectionResetError, OSError):
                     pass
     try:
@@ -368,28 +368,26 @@ async def index():
         f"<li><code>{cid}</code></li>" for cid in sorted(CLIENTS.keys())
     )
 
-    def device_row(busid: str) -> str:
-        assigned = DEVICE_ASSIGNMENTS.get(busid, "none")
-        in_use = DEVICE_IN_USE.get(busid)
-        name = DEVICE_NAMES.get(busid, busid)
+    def device_row(bus_id: str) -> str:
+        assigned = DEVICE_ASSIGNMENTS.get(bus_id, "none")
+        in_use = DEVICE_IN_USE.get(bus_id)
+        name = DEVICE_NAMES.get(bus_id, bus_id)
         opts = [f"<option value='none' {'selected' if assigned == 'none' else ''}>none</option>"]
         for cid in sorted(CLIENTS.keys()):
-            selected = "selected" if cid == assigned else ""
-            opts.append(f"<option value='{cid}' {selected}>{cid}</option>")
-        options_html = "".join(opts)
+            opts.append(f"<option value='{cid}' {'selected' if cid == assigned else ''}>{cid}</option>")
         status = f"in use by <b>{in_use}</b>" if in_use else "free"
         return (
             f"<tr>"
-            f"<td><code>{busid}</code> ({name})</td>"
+            f"<td><code>{bus_id}</code> ({name})</td>"
             f"<td>{status}</td>"
             f"<td>"
-            f"<select onchange='assign(\"{busid}\", this.value)' {'' if CLIENTS else 'disabled'}>"
-            f"{options_html}"
+            f"<select onchange='assign(\"{bus_id}\", this.value)' {'' if CLIENTS else 'disabled'}>"
+            f"{''.join(opts)}"
             f"</select>"
             f"</td>"
             f"<td>"
-            f"<button onclick='forceFree(\"{busid}\")'>Force free</button>"
-            f"<button onclick='forceReattach(\"{busid}\")'>Force reattach</button>"
+            f"<button onclick='forceFree(\"{bus_id}\")'>Force free</button>"
+            f"<button onclick='forceReattach(\"{bus_id}\")'>Force reattach</button>"
             f"</td>"
             f"</tr>"
         )
@@ -467,18 +465,18 @@ select {{ padding: 4px; }}
 {debug_output}
 
 <script>
-async function assign(busid, client_id){{
-  const r = await fetch(`/assign?busid=${{encodeURIComponent(busid)}}&client_id=${{encodeURIComponent(client_id)}}`);
+async function assign(bus_id, client_id){{
+  const r = await fetch(`/assign?bus_id=${{encodeURIComponent(bus_id)}}&client_id=${{encodeURIComponent(client_id)}}`);
   if(!r.ok) alert('Assign failed');
   location.reload();
 }}
-async function forceFree(busid){{
-  const r = await fetch(`/force_free?busid=${{encodeURIComponent(busid)}}`);
+async function forceFree(bus_id){{
+  const r = await fetch(`/force_free?bus_id=${{encodeURIComponent(bus_id)}}`);
   if(!r.ok) alert('Force free failed');
   location.reload();
 }}
-async function forceReattach(busid){{
-  const r = await fetch(`/force_reattach?busid=${{encodeURIComponent(busid)}}`);
+async function forceReattach(bus_id){{
+  const r = await fetch(`/force_reattach?bus_id=${{encodeURIComponent(bus_id)}}`);
   if(!r.ok) alert('Force reattach failed');
   location.reload();
 }}
@@ -496,26 +494,26 @@ async function assignAll(){{
 
 
 @app.get("/assign")
-async def assign(busid: str = Query(...), client_id: str = Query(...)):
-    if busid not in deviceBindSet:
-        ensure_bound(busid)
-    current = DEVICE_IN_USE.get(busid)
+async def assign(bus_id: str = Query(...), client_id: str = Query(...)):
+    if bus_id not in deviceBindSet:
+        ensure_bound(bus_id)
+    current = DEVICE_IN_USE.get(bus_id)
     if current == client_id:
-        DEVICE_ASSIGNMENTS[busid] = client_id
+        DEVICE_ASSIGNMENTS[bus_id] = client_id
         return JSONResponse({"status": "already-in-use"})
     if current and current != client_id:
-        force_free(busid)
+        force_free(bus_id)
     if client_id == "none":
-        DEVICE_IN_USE.pop(busid, None)
-        DEVICE_ASSIGNMENTS.pop(busid, None)
+        DEVICE_IN_USE.pop(bus_id, None)
+        DEVICE_ASSIGNMENTS.pop(bus_id, None)
         return JSONResponse({"status": "unassigned"})
-    DEVICE_ASSIGNMENTS[busid] = client_id
-    delivered = await send_to_client(client_id, f"Device {busid} binded\n")
+    DEVICE_ASSIGNMENTS[bus_id] = client_id
+    delivered = await send_to_client(client_id, f"Device {bus_id} bound\n")
     if delivered:
-        DEVICE_IN_USE[busid] = client_id
+        DEVICE_IN_USE[bus_id] = client_id
         return JSONResponse({"status": "assigned"})
     else:
-        DEVICE_IN_USE.pop(busid, None)
+        DEVICE_IN_USE.pop(bus_id, None)
         return JSONResponse({"status": "queued-for-client"})
 
 
@@ -524,40 +522,40 @@ async def assign_all(client_id: str = Query(...)):
     global ASSIGN_ALL_CLIENT_ID
     if client_id == "none":
         ASSIGN_ALL_CLIENT_ID = None
-        for busid in list(DEVICE_ASSIGNMENTS.keys()):
-            force_free(busid)
-            DEVICE_ASSIGNMENTS.pop(busid, None)
-            DEVICE_IN_USE.pop(busid, None)
+        for bus_id in list(DEVICE_ASSIGNMENTS.keys()):
+            force_free(bus_id)
+            DEVICE_ASSIGNMENTS.pop(bus_id, None)
+            DEVICE_IN_USE.pop(bus_id, None)
         return JSONResponse({"status": "cleared"})
     ASSIGN_ALL_CLIENT_ID = client_id
 
-    for busid in list(deviceBindSet):
-        if busid in DEVICE_ASSIGNMENTS and DEVICE_ASSIGNMENTS[busid] != client_id:
-            force_free(busid)
+    for bus_id in list(deviceBindSet):
+        if bus_id in DEVICE_ASSIGNMENTS and DEVICE_ASSIGNMENTS[bus_id] != client_id:
+            force_free(bus_id)
 
-    for busid in list(deviceBindSet):
-        DEVICE_ASSIGNMENTS[busid] = client_id
-        await send_to_client(client_id, f"Device {busid} binded\n")
-        DEVICE_IN_USE[busid] = client_id
+    for bus_id in list(deviceBindSet):
+        DEVICE_ASSIGNMENTS[bus_id] = client_id
+        await send_to_client(client_id, f"Device {bus_id} bound\n")
+        DEVICE_IN_USE[bus_id] = client_id
     return JSONResponse({"status": "assigned", "client_id": client_id})
 
 
 @app.get("/force_free")
-async def api_force_free(busid: str = Query(...)):
-    if busid not in deviceBindSet:
+async def api_force_free(bus_id: str = Query(...)):
+    if bus_id not in deviceBindSet:
         return JSONResponse({"status": "not-exported"})
-    force_free(busid)
-    DEVICE_IN_USE.pop(busid, None)
+    force_free(bus_id)
+    DEVICE_IN_USE.pop(bus_id, None)
     return JSONResponse({"status": "freed"})
 
 
 @app.get("/force_reattach")
-async def api_force_reattach(busid: str = Query(...)):
-    """Force reattach a device by busid if it is exported."""
-    if busid not in deviceBindSet:
+async def api_force_reattach(bus_id: str = Query(...)):
+    """Force reattach a device by bus id if it is exported."""
+    if bus_id not in deviceBindSet:
         return JSONResponse({"status": "not-exported"})
-    force_free(busid)
-    main_loop.call_soon_threadsafe(asyncio.create_task, notify_bound_to_assigned(busid))
+    force_free(bus_id)
+    main_loop.call_soon_threadsafe(asyncio.create_task, notify_bound_to_assigned(bus_id))
     return JSONResponse({"status": "reattached"})
 
 # ------------------ Main runner ------------------
