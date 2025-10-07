@@ -18,4 +18,4 @@ dependencies = [
 ]
 
 [project.scripts]
-usbip-server = "server.__main__:main"
+usbip-server = "server.__main__:run_server"

@@ -29,7 +29,7 @@ async def main():
     print("Managers initialized. Ready to start servers.")
 
 
-if __name__ == "__main__":
+def run_server():
     try:
         asyncio.run(main())
     except KeyboardInterrupt:
@@ -38,3 +38,7 @@ if __name__ == "__main__":
     except SystemExit:
         print("Script exiting.")
         exit(0)
+
+
+if __name__ == "__main__":
+    run_server()
