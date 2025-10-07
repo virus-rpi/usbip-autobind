@@ -21,90 +21,115 @@ I originally used https://github.com/mozram/usbip-autobind but i wanted more fun
 
 ---
 
-## Requirements
+## Requirements (Server Side)
 
+- **Linux** (tested on Raspbian and Arch)
 - **Python 3.10+** (may work with previous versions but untested)
-- **usbip** installed and configured on your system
+- **pip** (Python package manager)
+- **systemd** (for running services)
+- **Root privileges** (binding devices typically requires administrative access)
+
+## Requirements (Client Side)
+
+- **Linux or Windows** (tested on Arch and Windows 11)
+- **Python 3.10+** (may work with previous versions but untested)
+- **pip** (Python package manager)
 - **Root privileges** (binding devices typically requires administrative access)
 
 ---
 
 ## Installation (Server Side)
 
-1. Install usbip:
+### Automatic (Recommended)
+
+You can use the provided install script to set up everything automatically, including installing usbip, enabling kernel modules, creating required services, and running the server with uvx.
+
+Just run this one-liner (it will fetch the latest install script from GitHub and execute it):
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/virus-rpi/usbip-autobind/master/install_usbip_autobind_server.sh | sudo bash
+```
+
+The script will prompt you for configuration options (socket host/port, web host/port, physical ports whitelist, assignments file path) and set up a systemd service that runs the server with uvx. The service will always use your chosen settings and ensure usbipd is running.
+
+---
+
+### Manual (Advanced)
+
+1. **Install usbip and uvx:**
+   ```bash
+   sudo apt install usbip
+   # or for other distros:
+   # sudo dnf install usbip
+   # sudo pacman -Sy usbip
    
-```bash
-sudo apt install usbip
-```
+   # Install uvx if not already installed
+   pip3 install uvx
+   # or
+   pip install uvx
+   ```
 
-2. Enable kernel modules
+2. **Enable kernel modules:**
+   ```bash
+   sudo modprobe usbip-core usbip-host
+   ```
 
-```bash
-modprobe usbip-core usbip-host
-```
+3. **Create and enable the usbipd service:**
+   Create the file `/etc/systemd/system/usbipd.service` with:
+   ```ini
+   [Unit]
+   Description=usbip host daemon
+   After=network.target
 
+   [Service]
+   Type=forking
+   ExecStart=/usr/sbin/usbipd -D
 
-3. Add a service to start the usbip deamon:
+   [Install]
+   WantedBy=multi-user.target
+   ```
+   Then run:
+   ```bash
+   sudo systemctl daemon-reload
+   sudo systemctl enable usbipd
+   sudo systemctl start usbipd
+   ```
 
-Create the file /etc/systemd/system/usbipd.service with the following content:
+4. **Run the server with uvx:**
+   You can run the server directly with uvx, specifying your configuration options:
+   ```bash
+   sudo uvx --from git+https://github.com/virus-rpi/usbip-autobind@master usbip-server \
+     --socket-host 0.0.0.0 --socket-port 65432 \
+     --web-host 0.0.0.0 --web-port 8080 \
+     --physical-ports 1-1,1-2,2-1,2-2 \
+     --assignments-file /var/lib/usbip-autobind/assignments.json
+   ```
+   Example whitelist: `1-1,1-2,2-1,2-2` (these are bus IDs for USB ports; use `usbip list -l` to find yours).
 
-```
-[Unit]
-Description=usbip host daemon
-After=network.target
+5. **(Optional instead of step 4) Create a systemd service for the server:**
+   Create `/etc/systemd/system/usbip-autobind.service` with:
+   ```ini
+   [Unit]
+   Description=usbip-autobind server
+   After=network.target usbipd.service
+   Requires=usbipd.service
 
-[Service]
-Type=forking
-ExecStart=/usr/sbin/usbipd -D
+   [Service]
+   Type=simple
+   ExecStart=uvx --from git+https://github.com/virus-rpi/usbip-autobind@master usbip-server --socket-host 0.0.0.0 --socket-port 65432 --web-host 0.0.0.0 --web-port 8080 --physical-ports <comma-separated-whitelist> --assignments-file /var/lib/usbip-autobind/assignments.json
+   Restart=always
+   RestartSec=10s
 
-[Install]
-WantedBy=multi-user.target
-```
-
-Then run:
-
-```bash
-sudo systemctl daemon-reload
-sudo ststemctl enable usbipd
-sudo systemctl start usbipd
-```
-
-4. Install the requirements:
-
-```bash
-sudo apt install python-pyudev python-fastapi python-uvicorn
-```
-
-5. Download the usbip-host-autobind.py script
-6. Edit the PHYSICAL_PORTS variable. It is a whitelist of usb bus ids that should be bound. You can see the id of a port by pluging something in and running `usbip list -l`
-7. Add a service to start the python script (optional but recommended)
-
-Create the file /etc/systemd/system/usbip-autobind.service with the following content:
-
-```
-[Unit]
-Description=usbip host daemon
-After=network.target
-
-[Service]
-Type=simple
-ExecStart=/usr/bin/python3 /path/to/your/usbip-host-autobind.py
-
-[Install]
-WantedBy=multi-user.target
-```
-
-Replace the path to the usbip-host-autobind.py with the actual path.
-
-Then run:
-
-```bash
-sudo systemctl daemon-reload
-sudo ststemctl enable usbip-autobind
-sudo systemctl start usbip-autobind
-```
-
-Alternatively you can run the script directly with `sudo python3 usbip-host-autobind.py`.
+   [Install]
+   WantedBy=multi-user.target
+   ```
+   Then run:
+   ```bash
+   sudo systemctl daemon-reload
+   sudo systemctl enable usbip-autobind
+   sudo systemctl start usbip-autobind
+   ```
+---
 
 ## Installation (Client Side) 
 
