@@ -1,7 +1,7 @@
 import asyncio
 import logging
 
-from src.server.client_manager import ClientManager
+from .client_manager import ClientManager
 
 
 class TcpServer:

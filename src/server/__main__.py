@@ -1,6 +1,6 @@
 import asyncio
 
-from src.server.web_server import WebServer
+from .web_server import WebServer
 from .assignment_manager import AssignmentManager
 from .client_manager import ClientManager
 from .device_manager import DeviceManager
