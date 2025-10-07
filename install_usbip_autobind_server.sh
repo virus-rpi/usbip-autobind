@@ -1,6 +1,15 @@
 #!/bin/bash
 set -e
 
+if [ ! -t 0 ]; then
+  echo "ERROR: This script must be run in an interactive shell."
+  echo "Please download the script and run it directly, e.g.:"
+  echo "  curl -fsSL https://raw.githubusercontent.com/virus-rpi/usbip-autobind/master/install_usbip_autobind_server.sh -o install_usbip_autobind_server.sh"
+  echo "  chmod +x install_usbip_autobind_server.sh"
+  echo "  ./install_usbip_autobind_server.sh"
+  exit 1
+fi
+
 SERVICE_NAME="usbip-autobind"
 SERVICE_PATH="/etc/systemd/system/${SERVICE_NAME}.service"
 USBIPD_SERVICE_PATH="/etc/systemd/system/usbipd.service"
@@ -123,6 +132,7 @@ EOF
 sudo systemctl daemon-reload
 sudo systemctl enable "$SERVICE_NAME"
 sudo systemctl start "$SERVICE_NAME"
+sudo systemctl status "$SERVICE_NAME" --no-pager
 
 echo "Service $SERVICE_NAME installed and started."
 echo "You can edit $SERVICE_PATH to change arguments later."
