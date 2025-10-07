@@ -1,13 +1,15 @@
 #!/bin/bash
 set -e
 
+# If not interactive, re-exec in an interactive shell and delete self
 if [ ! -t 0 ]; then
-  echo "ERROR: This script must be run in an interactive shell."
-  echo "Please download the script and run it directly, e.g.:"
-  echo "  curl -fsSL https://raw.githubusercontent.com/virus-rpi/usbip-autobind/master/install_usbip_autobind_server.sh -o install_usbip_autobind_server.sh"
-  echo "  chmod +x install_usbip_autobind_server.sh"
-  echo "  ./install_usbip_autobind_server.sh"
-  exit 1
+  TMP_SCRIPT=$(mktemp /tmp/usbip-autobind-install.XXXXXX.sh)
+  echo "Script was piped or run non-interactively. Re-executing in an interactive shell..."
+  curl -fsSL https://raw.githubusercontent.com/virus-rpi/usbip-autobind/master/install_usbip_autobind_server.sh -o "$TMP_SCRIPT"
+  chmod +x "$TMP_SCRIPT"
+  "$TMP_SCRIPT"
+  rm -f "$TMP_SCRIPT"
+  exit 0
 fi
 
 SERVICE_NAME="usbip-autobind"
