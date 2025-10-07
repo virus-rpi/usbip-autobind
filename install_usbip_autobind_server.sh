@@ -25,12 +25,21 @@ if ! command -v usbip &> /dev/null; then
   fi
 fi
 
+# Find uvx in PATH or ~/.local/bin
+if ! command -v uvx &> /dev/null; then
+  if [ -x "$HOME/.local/bin/uvx" ]; then
+    export PATH="$HOME/.local/bin:$PATH"
+  fi
+fi
+
 if ! command -v uvx &> /dev/null; then
   echo "uvx not found. Installing via pip..."
   if command -v pip3 &> /dev/null; then
-    pip3 install uvx
+    pip3 install --user uvx
+    export PATH="$HOME/.local/bin:$PATH"
   elif command -v pip &> /dev/null; then
-    pip install uvx
+    pip install --user uvx
+    export PATH="$HOME/.local/bin:$PATH"
   else
     echo "pip not found. Please install pip and rerun this script."
     exit 1
