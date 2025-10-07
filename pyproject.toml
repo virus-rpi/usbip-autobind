@@ -3,4 +3,12 @@ name = "usbip-autobind"
 version = "0.1.0"
 description = "Add your description here"
 requires-python = ">=3.13"
-dependencies = []
+dependencies = [
+    "fastapi>=0.118.0",
+    "httpx>=0.28.1",
+    "logging>=0.4.9.6",
+    "nicegui>=3.0.3",
+    "pyudev>=0.24.3",
+    "starlette>=0.48.0",
+    "uvicorn>=0.37.0",
+]
