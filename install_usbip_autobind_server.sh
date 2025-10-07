@@ -4,8 +4,6 @@ set -e
 if [ "$EUID" -ne 0 ]; then
   echo "Please run as root."
   exit 1
-else
-  echo "Running as $USER"
 fi
 
 SERVICE_NAME="usbip-autobind"
@@ -40,6 +38,8 @@ if ! command -v uvx &> /dev/null; then
     export PATH="$USER_HOME/.local/bin:$PATH"
   fi
 fi
+
+echo "Using user home: $USER_HOME"
 
 if ! command -v uvx &> /dev/null; then
   echo "uvx not found. Installing via pip..."
