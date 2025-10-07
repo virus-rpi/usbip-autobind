@@ -1,7 +1,11 @@
 [project]
 name = "usbip-autobind"
 version = "0.1.0"
-description = "Add your description here"
+description = "A program to autobind USB devices over IP using USB/IP protocol."
+readme = "README.md"
+authors = [
+    { name = "virus-rpi", email = "usb@owo.computer" },
+]
 requires-python = ">=3.13"
 dependencies = [
     "fastapi>=0.118.0",
@@ -12,3 +16,6 @@ dependencies = [
     "starlette>=0.48.0",
     "uvicorn>=0.37.0",
 ]
+
+[project.scripts]
+usbip-server = "server.__main__:main"
