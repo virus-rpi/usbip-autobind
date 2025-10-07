@@ -276,7 +276,8 @@ The server exposes the following API endpoints for device and client management:
 You can use these endpoints to automate device assignment, management, and troubleshooting.
 
 
-<img width="1133" height="925" alt="Screenshot of the Web UI" src="https://github.com/user-attachments/assets/2efeedfe-21a1-4718-804a-db63b5bb493c" />
+<img width="1705" height="976" alt="image" src="https://github.com/user-attachments/assets/636ce3f9-abcd-4a51-8fba-f9260ac2841f" />
+
 
 ---
 
