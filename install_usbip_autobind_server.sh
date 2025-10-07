@@ -7,7 +7,7 @@ if [ ! -t 0 ]; then
   echo "Script was piped or run non-interactively. Re-executing in an interactive shell..."
   curl -fsSL https://raw.githubusercontent.com/virus-rpi/usbip-autobind/master/install_usbip_autobind_server.sh -o "$TMP_SCRIPT"
   chmod +x "$TMP_SCRIPT"
-  "$TMP_SCRIPT"
+  bash "$TMP_SCRIPT" -i
   rm -f "$TMP_SCRIPT"
   exit 0
 fi
