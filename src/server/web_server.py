@@ -51,16 +51,6 @@ async def assign_device(bus_id: str = Path(...), body: dict = Body(...)):
         device_manager.device_in_use.pop(bus_id, None)
         return JSONResponse({"status": "queued-for-client"})
 
-@app.post("/devices/{bus_id}/detach")
-async def detach_device(bus_id: str = Path(...), body: dict = Body(...)):
-    client_id = body.get("client_id", None)
-    device_manager.free_device(bus_id)
-    assignment_manager.remove_assignment(bus_id)
-    device_manager.device_in_use.pop(bus_id, None)
-    if client_id:
-        await client_manager.send_to_client(client_id, f"Device {bus_id} detached\n")
-    return JSONResponse({"status": "detached"})
-
 @app.post("/devices/{bus_id}/force_free")
 async def force_free_device(bus_id: str = Path(...)):
     if bus_id not in device_manager.device_bind_set:
@@ -74,9 +64,7 @@ async def force_reattach_device(bus_id: str = Path(...)):
     if bus_id not in device_manager.device_bind_set:
         return JSONResponse({"status": "not-exported"})
     await device_manager.force_free(bus_id)
-    assigned_client = assignment_manager.device_assignments.get(bus_id)
-    if assigned_client:
-        await client_manager.send_to_client(assigned_client, f"Device {bus_id} reattached\n")
+    await device_manager.notify_bound_to_assigned(bus_id)
     return JSONResponse({"status": "reattached"})
 
 @app.get("/devices")

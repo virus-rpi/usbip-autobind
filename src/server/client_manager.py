@@ -55,6 +55,8 @@ class ClientManager:
         except (ConnectionResetError, OSError):
             pass
 
+        await dispatcher.emit("updated")
+
     def unregister_client(self, client_id):
         freed = [b for b, cid in list(self.device_manager.device_in_use.items()) if cid == client_id]
         for b in freed:
@@ -67,6 +69,8 @@ class ClientManager:
             except Exception as e:
                 self.logger.warning(f"Failed to close writer for client {client_id}: {e}")
         self.logger.info(f"Unregistered client ID: {client_id}")
+
+        asyncio.create_task(dispatcher.emit("updated"))
 
     async def send_to_client(self, client_id, message):
         writer = self.clients.get(client_id)
@@ -85,9 +89,9 @@ class ClientManager:
     def get_connected_clients(self):
         return list(self.clients.keys())
 
-    def force_free(self, data):
+    async def force_free(self, data):
         bus_id, client_id = data
-        return self.send_to_client(client_id, f"Device {bus_id} unbound\n")
+        return await self.send_to_client(client_id, f"Device {bus_id} unbound\n")
 
     async def notify_bound_to_assigned(self, bus_id):
         target = self.assignment_manager.device_assignments.get(bus_id)
@@ -99,7 +103,7 @@ class ClientManager:
         for client_id in list(self.clients.keys()):
             self.send_to_client(client_id, f"Device {bus_id} removed\n")
 
-    def device_added(self, bus_id):
+    async def device_added(self, bus_id):
         if self.assignment_manager.assign_all_client_id and self.assignment_manager.assign_all_client_id in self.clients:
             self.assignment_manager.set_assignment(bus_id, self.assignment_manager.assign_all_client_id)
-        return self.notify_bound_to_assigned(bus_id)
+        return await self.notify_bound_to_assigned(bus_id)

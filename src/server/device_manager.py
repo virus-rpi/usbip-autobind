@@ -134,13 +134,15 @@ class DeviceManager:
             self.logger.info(f"New device on {bus_id}: binding...")
             self.ensure_bound(bus_id)
             self.main_loop.call_soon_threadsafe(asyncio.create_task, self.notify_bound_to_assigned(bus_id))
+            self.main_loop.call_soon_threadsafe(asyncio.create_task, dispatcher.emit("updated", bus_id))
         elif action == 'remove':
             if bus_id in self.device_bind_set:
                 self.logger.info(f"Device {bus_id} removed")
                 self.device_bind_set.discard(bus_id)
             self.device_names.pop(bus_id, None)
             self.device_in_use.pop(bus_id, None)
-            self.main_loop.call_soon_threadsafe(asyncio.create_task, lambda: dispatcher.emit("device_removed", bus_id))
+            self.main_loop.call_soon_threadsafe(asyncio.create_task, dispatcher.emit("device_removed", bus_id))
+            self.main_loop.call_soon_threadsafe(asyncio.create_task, dispatcher.emit("updated", bus_id))
 
     def cleanup(self):
         self.logger.info("Starting cleanup: unbinding all devices...")

@@ -36,6 +36,8 @@ class TcpServer:
                     break
         except (ConnectionResetError, OSError):
             self.logger.info(f"Client connection reset: {client_id}")
+        except asyncio.CancelledError:
+            self.logger.info(f"Client handler cancelled: {client_id}")
         finally:
             self.client_manager.unregister_client(client_id)
 

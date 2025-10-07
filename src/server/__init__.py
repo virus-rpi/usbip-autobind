@@ -4,9 +4,9 @@ import os
 from .events import EventDispatcher
 
 SOCKET_HOST = '0.0.0.0'
-SOCKET_PORT = 65439
+SOCKET_PORT = 65432
 WEB_HOST = '0.0.0.0'
-WEB_PORT = 8081
+WEB_PORT = 8080
 PHYSICAL_PORTS = ["1-1", "3-1", "1-2", "3-2"]
 ASSIGNMENTS_FILE = os.path.join(os.path.dirname(__file__), "assignments.json")
 
