@@ -1,10 +1,9 @@
 #!/bin/bash
 set -e
 
-# If not interactive, re-exec in an interactive shell and delete self
 if [ ! -t 0 ]; then
   TMP_SCRIPT=$(mktemp /tmp/usbip-autobind-install.XXXXXX.sh)
-  echo "Script was piped or run non-interactively. Re-executing in an interactive shell..."
+  echo "Script was piped or run non-interactively. Creating temporary script at $TMP_SCRIPT"
   curl -fsSL https://raw.githubusercontent.com/virus-rpi/usbip-autobind/master/install_usbip_autobind_server.sh -o "$TMP_SCRIPT"
   chmod +x "$TMP_SCRIPT"
   echo "Run ./$TMP_SCRIPT in an interactive terminal to proceed with installation."
