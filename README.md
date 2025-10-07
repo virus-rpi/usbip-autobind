@@ -47,7 +47,7 @@ You can use the provided install script to set up everything automatically, incl
 Just run this one-liner (it will fetch the latest install script from GitHub and execute it):
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/virus-rpi/usbip-autobind/master/install_usbip_autobind_server.sh | sudo bash
+curl -fsSL https://raw.githubusercontent.com/virus-rpi/usbip-autobind/master/install_usbip_autobind_server.sh | bash
 ```
 
 The script will prompt you for configuration options (socket host/port, web host/port, physical ports whitelist, assignments file path) and set up a systemd service that runs the server with uvx. The service will always use your chosen settings and ensure usbipd is running.

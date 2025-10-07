@@ -1,87 +1,32 @@
 #!/bin/bash
 set -e
 
-if [ "$EUID" -ne 0 ]; then
-  echo "Please run as root."
-  exit 1
-fi
-
 SERVICE_NAME="usbip-autobind"
 SERVICE_PATH="/etc/systemd/system/${SERVICE_NAME}.service"
 USBIPD_SERVICE_PATH="/etc/systemd/system/usbipd.service"
+ASSIGNMENTS_DEFAULT="/var/lib/usbip-autobind/assignments.json"
 
-if ! command -v usbip &> /dev/null; then
-  echo "usbip not found. Attempting to install..."
-  if command -v apt-get &> /dev/null; then
-    apt-get update
-    apt-get install -y usbip
-  elif command -v dnf &> /dev/null; then
-    dnf install -y usbip
-  elif command -v pacman &> /dev/null; then
-    pacman -Sy --noconfirm usbip
-  else
-    echo "Could not detect package manager. Please install usbip manually."
-    exit 1
-  fi
-fi
-
-# Determine the correct user home for uvx
-if [ -n "$SUDO_USER" ]; then
-  USER_HOME=$(eval echo ~$SUDO_USER)
-else
-  USER_HOME="$HOME"
-fi
-
-# Find uvx in PATH or userland
+# 1. Ensure uvx is installed for the current user
 if ! command -v uvx &> /dev/null; then
-  if [ -x "$USER_HOME/.local/bin/uvx" ]; then
-    export PATH="$USER_HOME/.local/bin:$PATH"
+  if [ -x "$HOME/.local/bin/uvx" ]; then
+    export PATH="$HOME/.local/bin:$PATH"
   fi
 fi
-
-echo "Using user home: $USER_HOME"
-
 if ! command -v uvx &> /dev/null; then
   echo "uvx not found. Installing via pip..."
   if command -v pip3 &> /dev/null; then
-    sudo -u "$SUDO_USER" pip3 install --user uvx
-    export PATH="$USER_HOME/.local/bin:$PATH"
+    pip3 install --user uvx
+    export PATH="$HOME/.local/bin:$PATH"
   elif command -v pip &> /dev/null; then
-    sudo -u "$SUDO_USER" pip install --user uvx
-    export PATH="$USER_HOME/.local/bin:$PATH"
+    pip install --user uvx
+    export PATH="$HOME/.local/bin:$PATH"
   else
     echo "pip not found. Please install pip and rerun this script."
     exit 1
   fi
 fi
 
-# Enable kernel modules
-modprobe usbip-core || true
-modprobe usbip-host || true
-
-# Create and enable usbipd systemd service if missing
-if [ ! -f "$USBIPD_SERVICE_PATH" ]; then
-  echo "Creating usbipd systemd service..."
-  cat <<EOF > "$USBIPD_SERVICE_PATH"
-[Unit]
-Description=usbip host daemon
-After=network.target
-
-[Service]
-Type=forking
-ExecStart=/usr/sbin/usbipd -D
-
-[Install]
-WantedBy=multi-user.target
-EOF
-  systemctl daemon-reload
-  systemctl enable usbipd
-  systemctl start usbipd
-else
-  systemctl start usbipd
-fi
-
-# Prompt for overrides with defaults
+# 2. Prompt for config options as user
 read -p "Socket host [0.0.0.0]: " SOCKET_HOST
 SOCKET_HOST=${SOCKET_HOST:-0.0.0.0}
 
@@ -104,17 +49,62 @@ while true; do
 done
 PHYSICAL_PORTS_ARG="--physical-ports $PHYSICAL_PORTS"
 
-read -p "Assignments file path [/var/lib/usbip-autobind/assignments.json]: " ASSIGNMENTS_FILE
-ASSIGNMENTS_FILE=${ASSIGNMENTS_FILE:-/var/lib/usbip-autobind/assignments.json}
-
-# Ensure assignments file directory exists
+read -p "Assignments file path [$ASSIGNMENTS_DEFAULT]: " ASSIGNMENTS_FILE
+ASSIGNMENTS_FILE=${ASSIGNMENTS_FILE:-$ASSIGNMENTS_DEFAULT}
 ASSIGNMENTS_DIR=$(dirname "$ASSIGNMENTS_FILE")
-mkdir -p "$ASSIGNMENTS_DIR"
+
+# 3. System-level operations (sudo)
+
+# Install usbip if missing
+if ! command -v usbip &> /dev/null; then
+  echo "usbip not found. Attempting to install..."
+  if command -v apt-get &> /dev/null; then
+    sudo apt-get update
+    sudo apt-get install -y usbip
+  elif command -v dnf &> /dev/null; then
+    sudo dnf install -y usbip
+  elif command -v pacman &> /dev/null; then
+    sudo pacman -Sy --noconfirm usbip
+  else
+    echo "Could not detect package manager. Please install usbip manually."
+    exit 1
+  fi
+fi
+
+# Enable kernel modules
+sudo modprobe usbip-core || true
+sudo modprobe usbip-host || true
+
+# Create assignments file directory
+sudo mkdir -p "$ASSIGNMENTS_DIR"
+
+# Create and enable usbipd systemd service if missing
+if ! sudo test -f "$USBIPD_SERVICE_PATH"; then
+  echo "Creating usbipd systemd service..."
+  sudo tee "$USBIPD_SERVICE_PATH" > /dev/null <<EOF
+[Unit]
+Description=usbip host daemon
+After=network.target
+
+[Service]
+Type=forking
+ExecStart=/usr/sbin/usbipd -D
+
+[Install]
+WantedBy=multi-user.target
+EOF
+  sudo systemctl daemon-reload
+  sudo systemctl enable usbipd
+  sudo systemctl start usbipd
+else
+  sudo systemctl start usbipd
+fi
 
 # Build ExecStart command
-EXEC_CMD="$USER_HOME/.local/bin/uvx --from git+https://github.com/virus-rpi/usbip-autobind@master usbip-server --socket-host $SOCKET_HOST --socket-port $SOCKET_PORT --web-host $WEB_HOST --web-port $WEB_PORT $PHYSICAL_PORTS_ARG --assignments-file $ASSIGNMENTS_FILE"
+EXEC_CMD="$HOME/.local/bin/uvx --from git+https://github.com/virus-rpi/usbip-autobind@master usbip-server --socket-host $SOCKET_HOST --socket-port $SOCKET_PORT --web-host $WEB_HOST --web-port $WEB_PORT $PHYSICAL_PORTS_ARG --assignments-file $ASSIGNMENTS_FILE"
 
-cat <<EOF > "$SERVICE_PATH"
+# Create and enable usbip-autobind systemd service
+sudo tee "$SERVICE_PATH" > /dev/null <<EOF
 [Unit]
 Description=usbip-autobind server
 After=network.target usbipd.service
@@ -130,9 +120,9 @@ RestartSec=10s
 WantedBy=multi-user.target
 EOF
 
-systemctl daemon-reload
-systemctl enable "$SERVICE_NAME"
-systemctl start "$SERVICE_NAME"
+sudo systemctl daemon-reload
+sudo systemctl enable "$SERVICE_NAME"
+sudo systemctl start "$SERVICE_NAME"
 
 echo "Service $SERVICE_NAME installed and started."
 echo "You can edit $SERVICE_PATH to change arguments later."
