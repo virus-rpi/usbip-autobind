@@ -162,14 +162,22 @@ def show_device_groups():
     async def refresh():
         devices = await fetch_devices()
         clients = await fetch_clients()
+        debug = await fetch_debug()
+        assign_all_client_id = debug.get('assign_all_client_id', None)
         with container:
             container.clear()
             ui.label('Devices').classes('text-xl font-bold mb-2')
+            assigned_client = assign_all_client_id if assign_all_client_id and assign_all_client_id != "none" else None
+            if assigned_client:
+                ui.label(f"All devices assigned to: {assigned_client}").classes('font-bold text-lg')
             with ui.row().classes('mt-4 gap-2'):
-                ui.button('Assign All', icon='group', on_click=lambda: assign_all_dialog(clients, refresh))
+                if assigned_client:
+                    ui.button('Assign All', icon='group', on_click=lambda: (asyncio.create_task(assign_all_devices(assigned_client)), asyncio.create_task(refresh())))
+                    ui.button('Assign All to Other Client', icon='group', color='positive', on_click=lambda: assign_all_dialog(clients, refresh))
+                else:
+                    ui.button('Assign All', icon='group', on_click=lambda: assign_all_dialog(clients, refresh))
                 ui.button('Unassign All', icon='person_remove', color='warning',
-                          on_click=lambda: asyncio.create_task(unassign_all_devices()) or asyncio.create_task(
-                              refresh())).classes('mb-4')
+                          on_click=lambda: asyncio.create_task(unassign_all_devices()) or asyncio.create_task(refresh())).classes('mb-4')
                 ui.button('Refresh', icon='refresh', on_click=lambda: asyncio.create_task(refresh()))
             if not devices:
                 ui.label('No devices found').classes('text-xl font-bold')

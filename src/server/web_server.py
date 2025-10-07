@@ -97,6 +97,7 @@ async def assign_all(body: dict = Body(...)):
             await device_manager.force_free(bus_id)
             assignment_manager.device_assignments.pop(bus_id, None)
             device_manager.device_in_use.pop(bus_id, None)
+        await dispatcher.emit("updated")
         return JSONResponse({"status": "cleared"})
     assignment_manager.assign_all_client_id = client_id
     for bus_id in list(device_manager.device_bind_set):
@@ -106,6 +107,7 @@ async def assign_all(body: dict = Body(...)):
         assignment_manager.device_assignments[bus_id] = client_id
         await client_manager.send_to_client(client_id, f"Device {bus_id} bound\n")
         device_manager.device_in_use[bus_id] = client_id
+    await dispatcher.emit("updated")
     return JSONResponse({"status": "assigned", "client_id": client_id})
 
 @app.get("/clients")
