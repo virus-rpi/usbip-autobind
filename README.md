@@ -141,17 +141,22 @@ The script will prompt you for configuration options (socket host/port, web host
 sudo apt install usbip
 ```
 
-2. Enable kernel modules
+2. Enable kernel modules:
 
 ```bash
-modprobe usbip-core usbip-host
+sudo modprobe usbip-core usbip-host
 ```
 
-3. Download the usbip-client-autoattach.py
-4. Edit the SOCKET_HOST variable and put in the ip address of the server
-5. Add a service to start the python script (optional but recommended)
+3. Run the client using uvx:
 
-Create the file /etc/systemd/system/usbip-autoattach.service with the following content:
+```bash
+uvx --from git+https://github.com/virus-rpi/usbip-autobind@master usbip-client --socket-host <server-ip> [other options]
+```
+Replace `<server-ip>` with the IP address of your server. You can pass additional options as needed.
+
+4. (Optional but recommended) Add a service to start the client automatically:
+
+Create the file `/etc/systemd/system/usbip-autoattach.service` with the following content:
 
 ```
 [Unit]
@@ -159,7 +164,7 @@ Description=USBIP Client Service
 After=network-online.target
 
 [Service]
-ExecStart=/usr/bin/python3 /path/to/your/usbip-client-autoattach.py
+ExecStart=/usr/bin/uvx --from git+https://github.com/virus-rpi/usbip-autobind@master usbip-client --socket-host <server-ip> [other options]
 Restart=always
 RestartSec=10s
 
@@ -167,68 +172,111 @@ RestartSec=10s
 WantedBy=multi-user.target
 ```
 
-Replace the path to the usbip-client-autobind.py with the actual path.
+Replace `<server-ip>` and add any other options you need. Also make sure the path to uvx is correct (you can find it with `which uvx`).
 
 Then run:
 
 ```bash
 sudo systemctl daemon-reload
-sudo ststemctl enable usbip-autoattach
+sudo systemctl enable usbip-autoattach
 sudo systemctl start usbip-autoattach
 ```
 
-Alternatively you can run the script directly with `sudo python3 usbip-client-autobind.py`.
+Alternatively, you can run the client directly with `sudo uvx --from git+https://github.com/virus-rpi/usbip-autobind@master usbip-client --socket-host <server-ip>`.
 
 ### Windows
 
 1. Install usbip:
-   Just follow the instructions in the readme of https://github.com/vadimgrn/usbip-win2
-2. Download the usbip-client-autoattach.py
-3. Edit the SOCKET_HOST variable and put in the ip address of the server
-4. Add a service to start the python script (optional but recommended)
+   Follow the instructions in the readme of https://github.com/vadimgrn/usbip-win2
 
-The easies way to add a service on windows is with nssm. (to install nssm do `winget install nssm`)
-To create a service first make a bat file containing:
-```bat
-@echo off
-"C:\path\to\your\python.exe" "C:\path\to\your\usbip-client-autobind.py"
-```
-Place it at some for services accessible place like C:\usbip\start-client.bat
+2. Run the client using uvx:
+   Download uvx for Windows from https://github.com/virus-rpi/uvx/releases and place it somewhere accessible.
 
-Then start cmd or powershell as admin and run:
-```bat
-nssm install USBIP-AutoAttach
-```
+   Example command:
+   ```bat
+   uvx.exe --from git+https://github.com/virus-rpi/usbip-autobind@master usbip-client --socket-host <server-ip> [other options]
+   ```
+   Replace `<server-ip>` with the IP address of your server.
 
-This should open a gui where you can select the bat file you created as path.
-Optionally you can configure a log.txt file in the I/O tab if you want to keep logs. 
-You can click through the other tabs and configure the service how you want.
-Then just click "Install"
+3. (Optional but recommended) Add a service to start the client automatically:
+   The easiest way to add a service on Windows is with nssm. (to install nssm do `winget install nssm`)
 
-After that run:
-```bat
-nssm enable USBIP-AutoAttach
-nssm start USBIP-AutoAttach
-```
+   Create a .bat file containing:
+   ```bat
+   @echo off
+   "C:\path\to\uvx.exe" --from git+https://github.com/virus-rpi/usbip-autobind@master usbip-client --socket-host <server-ip> [other options]
+   ```
+   Place it at a location accessible for services, e.g., `C:\usbip\start-client.bat`.
 
-Alternatively you can run the script directly with `python usbip-client-autobind.py` in an admin shell.
+   Then start cmd or powershell as admin and run:
+   ```bat
+   nssm install USBIP-AutoAttach
+   ```
+   In the GUI, select the .bat file you created as the path. Optionally configure a log.txt file in the I/O tab if you want to keep logs. Configure other options as desired, then click "Install".
+
+   After that run:
+   ```bat
+   nssm enable USBIP-AutoAttach
+   nssm start USBIP-AutoAttach
+   ```
+
+   Alternatively, you can run the client directly with `uvx.exe --from git+https://github.com/virus-rpi/usbip-autobind@master usbip-client --socket-host <server-ip>` in an admin shell.
 
 ---
 
+**Available options for the client:**
+
+- `--socket-host`: The server IP or hostname to connect to (default: chikaraNeko.fritz.box)
+- `--socket-port`: The server port to connect to (default: 65432)
+- `--reconnect-delay`: Seconds to wait before reconnecting if the connection drops (default: 5)
+- `--client-id`: The client identifier (default: your computer's hostname, lowercased)
+
+You can see all available options and their descriptions by running:
+```bash
+uvx --from git+https://github.com/virus-rpi/usbip-autobind@master usbip-client --help
+```
+
 ## Usage
 
-- The server script will automatically detect all connected USB devices and bind them to the usbip driver.
-- The client should automatically connect to the server
-- Then visit the web ui hosted at port 8080 on the server.
-  On there you can assign all USB devices at once to one client or assign them individually for more control.
-  If a client goes offline and comes back later it will automatically connect to the assigned devices again as long as they are free.
-  You can also force free a USB device which tells the client to detach, unbinds the device from usbip and then rebinds it.
-  Force reattach does the same, except it tells the client to attach again afterwards.
-  At the bottom of the page you can see the raw state of a few variables for troubbleshooting.
-- You can also controll the host via an api on the endpoints /assign /assign_all /force_free and /force_reattach
+- The server script automatically detects all connected USB devices and binds them to the usbip driver.
+- The client connects to the server and manages device attachments as assigned.
+- Visit the web UI (default: port 8080 on the server) for full control:
+  - **Device Management:**
+    - View all USB devices, their names, bus IDs, assignment status, and usage.
+    - Assign any device to a client, reassign to another client, unassign, force free, or reattach.
+    - Assign all devices to a client, assign all to another client, or unassign all devices at once.
+    - Refresh device list at any time.
+  - **Client Management:**
+    - View all connected clients in a dedicated section.
+  - **Debug Panel:**
+    - View live debug information (internal state) in a collapsible panel.
+    - Refresh debug info on demand.
+  - **Dark Mode Toggle:**
+    - Easily switch between dark and light mode.
+  - **Live Updates:**
+    - UI auto-refreshes when device/client state changes.
+
+- If a client goes offline and comes back later, it will automatically reconnect to its assigned devices as long as they are free.
+- You can also use the API endpoints for automation and troubleshooting (see below).
+
+
+## API Endpoints
+
+The server exposes the following API endpoints for device and client management:
+
+- `GET /devices` — List all USB devices, their bus IDs, assigned clients, usage status, and names.
+- `GET /devices/{bus_id}` — Get details for a specific device.
+- `POST /devices/{bus_id}/assign` — Assign a device to a client. Body: `{ "client_id": ... }`
+- `POST /devices/{bus_id}/force_free` — Force free a device (detach from client).
+- `POST /devices/{bus_id}/force_reattach` — Force reattach a device to its assigned client.
+- `POST /assign_all` — Assign all devices to a client or clear all assignments. Body: `{ "client_id": ... }`
+- `GET /clients` — List all connected clients.
+- `GET /debug` — Get debug information (internal state).
+
+You can use these endpoints to automate device assignment, management, and troubleshooting.
+
 
 <img width="1133" height="925" alt="Screenshot of the Web UI" src="https://github.com/user-attachments/assets/2efeedfe-21a1-4718-804a-db63b5bb493c" />
-
 
 ---
 
@@ -241,7 +289,7 @@ Alternatively you can run the script directly with `python usbip-client-autobind
    For each detected device, it attempts to bind the device interface to the usbip driver using `usbip` commands.
 
 3. **Attaching:**  
-   To attach a device the host sends a command to the client to bind a specific device over a socket connection. If you chage to which client a device should be attached it sends a command to the old client to detach and a attach command to te new client.
+   To attach a device the host sends a command to the client to bind a specific device over a socket connection. If you change to which client a device should be attached it sends a command to the old client to detach and an attach command to the new client.
 
 ---
 
@@ -253,12 +301,12 @@ Alternatively you can run the script directly with `python usbip-client-autobind
 - **usbip Not Found:**  
   Make sure `usbip` is installed and available in your system's PATH.
 
-- **The USB device doesnt show up in the list**:
-  Make sure the port you pluged it in is on the whitelist.
+- **The USB device doesn't show up in the list**:
+  Make sure the port you plugged it in is on the whitelist.
 
 - A lot of different errors can occur on linux if you dont properly install the kernel modules. Make sure you execute `modprobe usbip-core usbip-host`
-- For connectiong issues check the host ip in the client script and check if a firewall is blocking something
-- If your system does not use systemd your a nerdy enough to figure out how to do services yourself
+- For connection issues check the host ip in the client script and check if a firewall is blocking something
+- If your system does not use systemd you're a nerdy enough to figure out how to do services yourself
 
 ---
 
