@@ -9,6 +9,7 @@ authors = [
 requires-python = ">=3.13"
 dependencies = [
     "argparse>=1.4.0",
+    "asyncio>=4.0.0",
     "fastapi>=0.118.0",
     "httpx>=0.28.1",
     "logging>=0.4.9.6",
@@ -21,3 +22,10 @@ dependencies = [
 [project.scripts]
 usbip-server = "server.__main__:run_server"
 usbip-client = "client.__main__:run_client"
+
+[build-system]
+requires = ["setuptools>=80.9.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[tool.uv]
+package = true

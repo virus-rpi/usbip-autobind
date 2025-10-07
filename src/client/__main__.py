@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+import argparse
 import asyncio
 import logging
 import re
@@ -17,12 +18,13 @@ if not logger.hasHandlers():
     logger.addHandler(handler)
 
 
-SOCKET_HOST = 'chikaraNeko.fritz.box'
-SOCKET_PORT = 65432
-RECONNECT_DELAY = 5  # seconds
-
-CLIENT_ID = socket.gethostname().strip().lower()
-logger.info(f"Using hostname '{CLIENT_ID}' as client ID.")
+def parse_args():
+    parser = argparse.ArgumentParser(description="USBIP Autobind Client")
+    parser.add_argument('--socket-host', type=str, default='chikaraNeko.fritz.box', help='Host for TCP server')
+    parser.add_argument('--socket-port', type=int, default=65432, help='Port for TCP server')
+    parser.add_argument('--reconnect-delay', type=int, default=5, help='Seconds to wait before reconnecting')
+    parser.add_argument('--client-id', type=str, default=socket.gethostname().strip().lower(), help='Client ID (default: hostname)')
+    return parser.parse_args()
 
 
 def parse_bus_ids(usbip_output: str):
@@ -39,11 +41,11 @@ def parse_bus_ids(usbip_output: str):
     return bus_ids
 
 
-def list_bound_devices():
+def list_bound_devices(socket_host):
     """Run `usbip list -r` and return all bound device bus ids."""
     try:
         result = subprocess.run(
-            ["usbip", "list", "-r", SOCKET_HOST],
+            ["usbip", "list", "-r", socket_host],
             capture_output=True, text=True
         )
     except FileNotFoundError:
@@ -89,11 +91,11 @@ def get_attached_ports():
     return ports
 
 
-def attach_device(bus_id):
+def attach_device(bus_id, socket_host):
     """Attach to a device via USBIP."""
     logger.info(f"Attaching to {bus_id}...")
     result = subprocess.run(
-        ["usbip", "attach", "-r", SOCKET_HOST, "-b", bus_id],
+        ["usbip", "attach", "-r", socket_host, "-b", bus_id],
         capture_output=True, text=True
     )
     if result.stdout.strip():
@@ -122,16 +124,19 @@ def detach_device(bus_id):
 
 
 class UsbipClient(asyncio.Protocol):
-    def __init__(self, on_disconnect):
+    def __init__(self, on_disconnect, socket_host, socket_port, client_id):
         super().__init__()
         self.transport = None
         self.on_disconnect = on_disconnect
         self.buffer = b''
+        self.socket_host = socket_host
+        self.socket_port = socket_port
+        self.client_id = client_id
 
     def connection_made(self, transport: WriteTransport):
         self.transport: WriteTransport = transport
-        logger.info(f"Connected to {SOCKET_HOST}:{SOCKET_PORT}")
-        transport.write(f"CLIENT_ID:{CLIENT_ID}\n".encode())
+        logger.info(f"Connected to {self.socket_host}:{self.socket_port}")
+        transport.write(f"CLIENT_ID:{self.client_id}\n".encode())
         transport.write(b'Client Echo\n')
 
     def data_received(self, data):
@@ -153,9 +158,9 @@ class UsbipClient(asyncio.Protocol):
                     attached_ports = get_attached_ports()
                     if device_id in attached_ports:
                         detach_device(device_id)
-                    if device_id in list_bound_devices():
+                    if device_id in list_bound_devices(self.socket_host):
                         logger.info("Device available on server. Attaching...")
-                        attach_device(device_id)
+                        attach_device(device_id, self.socket_host)
                     else:
                         logger.warning("Device not available on server or already attached elsewhere.")
             elif 'unbound' in message:
@@ -170,6 +175,8 @@ class UsbipClient(asyncio.Protocol):
         self.on_disconnect()
 
 async def main():
+    args = parse_args()
+    logger.info(f"Using hostname '{args.client_id}' as client ID.")
     while True:
         reconnect_event = asyncio.Event()
 
@@ -179,14 +186,14 @@ async def main():
         loop = asyncio.get_running_loop()
         try:
             await loop.create_connection(
-                lambda: UsbipClient(on_disconnect=schedule_reconnect),
-                SOCKET_HOST, SOCKET_PORT
+                lambda: UsbipClient(on_disconnect=schedule_reconnect, socket_host=args.socket_host, socket_port=args.socket_port, client_id=args.client_id),
+                args.socket_host, args.socket_port
             )
             await reconnect_event.wait()
         except (ConnectionRefusedError, OSError):
-            logger.error(f"Server not available, retrying in {RECONNECT_DELAY}s...")
+            logger.error(f"Server not available, retrying in {args.reconnect_delay}s...")
 
-        await asyncio.sleep(RECONNECT_DELAY)
+        await asyncio.sleep(args.reconnect_delay)
 
 def run_client():
     asyncio.run(main())
