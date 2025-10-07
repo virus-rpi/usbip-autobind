@@ -26,7 +26,7 @@ I originally used https://github.com/mozram/usbip-autobind but i wanted more fun
 - **Linux** (tested on Raspbian and Arch)
 - **Python 3.10+** (may work with previous versions but untested)
 - **pip** (Python package manager)
-- **systemd** (for running services)
+- **systemd** (for running services, optional if you dont want to run it as a service or know how to do it without systemd)
 - **Root privileges** (binding devices typically requires administrative access)
 
 ## Requirements (Client Side)
