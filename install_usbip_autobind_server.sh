@@ -25,21 +25,28 @@ if ! command -v usbip &> /dev/null; then
   fi
 fi
 
-# Find uvx in PATH or ~/.local/bin
+# Determine the correct user home for uvx
+if [ -n "$SUDO_USER" ]; then
+  USER_HOME=$(eval echo ~$SUDO_USER)
+else
+  USER_HOME="$HOME"
+fi
+
+# Find uvx in PATH or userland
 if ! command -v uvx &> /dev/null; then
-  if [ -x "$HOME/.local/bin/uvx" ]; then
-    export PATH="$HOME/.local/bin:$PATH"
+  if [ -x "$USER_HOME/.local/bin/uvx" ]; then
+    export PATH="$USER_HOME/.local/bin:$PATH"
   fi
 fi
 
 if ! command -v uvx &> /dev/null; then
   echo "uvx not found. Installing via pip..."
   if command -v pip3 &> /dev/null; then
-    pip3 install --user uvx
-    export PATH="$HOME/.local/bin:$PATH"
+    sudo -u "$SUDO_USER" pip3 install --user uvx
+    export PATH="$USER_HOME/.local/bin:$PATH"
   elif command -v pip &> /dev/null; then
-    pip install --user uvx
-    export PATH="$HOME/.local/bin:$PATH"
+    sudo -u "$SUDO_USER" pip install --user uvx
+    export PATH="$USER_HOME/.local/bin:$PATH"
   else
     echo "pip not found. Please install pip and rerun this script."
     exit 1
@@ -103,7 +110,7 @@ ASSIGNMENTS_DIR=$(dirname "$ASSIGNMENTS_FILE")
 mkdir -p "$ASSIGNMENTS_DIR"
 
 # Build ExecStart command
-EXEC_CMD="uvx --from git+https://github.com/virus-rpi/usbip-autobind@master usbip-server --socket-host $SOCKET_HOST --socket-port $SOCKET_PORT --web-host $WEB_HOST --web-port $WEB_PORT $PHYSICAL_PORTS_ARG --assignments-file $ASSIGNMENTS_FILE"
+EXEC_CMD="$USER_HOME/.local/bin/uvx --from git+https://github.com/virus-rpi/usbip-autobind@master usbip-server --socket-host $SOCKET_HOST --socket-port $SOCKET_PORT --web-host $WEB_HOST --web-port $WEB_PORT $PHYSICAL_PORTS_ARG --assignments-file $ASSIGNMENTS_FILE"
 
 cat <<EOF > "$SERVICE_PATH"
 [Unit]
