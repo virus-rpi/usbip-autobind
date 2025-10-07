@@ -188,6 +188,8 @@ async def main():
 
         await asyncio.sleep(RECONNECT_DELAY)
 
+def run_client():
+    asyncio.run(main())
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    run_client()

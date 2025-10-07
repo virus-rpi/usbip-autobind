@@ -20,3 +20,4 @@ dependencies = [
 
 [project.scripts]
 usbip-server = "server.__main__:run_server"
+usbip-client = "client.usbip-client-autoattach:run_client"
